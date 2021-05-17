@@ -1,0 +1,33 @@
+WHITESPACE      = _{ " " | "\n" }
+COMMENT         = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+
+AddOp           = { "+" | "-" }
+MulOp           = { "*" | "/" }
+Alphabet        = { ('a'..'z') | ('A'..'Z') }
+Digit           = { '0'..'9' }
+CompOp          = { "==" | ">=" | ">" | "<=" | "<" }
+Types           = { "int" | "char" }
+Ident           = @{ Alphabet ~ (Digit | Alphabet)* }
+Number          = @{ AddOp? ~ '1'..'9' ~ Digit* }
+Expr            = { AtomExpr ~ CompOp ~ AtomExpr | AtomExpr }
+
+AtomExpr        = { Term ~ AtomExprHalf }
+AtomExprHalf    = { AddOp ~ Term ~ AtomExprHalf | "" }
+
+Term            = { Factor ~ TermHalf }
+TermHalf        = { MulOp ~ Factor ~ TermHalf | "" }
+
+Factor          = { "(" ~ Expr ~ ")" | Number | Ident }
+
+ExprSeq         = { Expr ~ "," ~ ExprSeq | Expr }
+CallStmt        = { Ident ~ "(" ~ ExprSeq ~ ")" }
+
+DeclStmt        = { Types ~ Ident }
+AssignStmt      = { Ident ~ ":=" ~ Expr }
+RepeatStmt      = { "repeat" ~ StmtSeq ~ "until" ~ Expr }
+IfStmt          = { SingleIfStmt | IfElseStmt }
+SingleIfStmt    = { "if" ~ "(" ~ Expr ~ ")" ~ "then" ~ StmtSeq ~ "end" }
+IfElseStmt      = { "if" ~ "(" ~ Expr ~ ")" ~ "then" ~ StmtSeq ~ "else" ~ StmtSeq ~ "end" }
+Stmt            = { IfStmt | RepeatStmt | AssignStmt | DeclStmt }
+StmtSeq         = { Stmt ~ ";" ~ StmtSeq | Stmt }
+Program         = { StmtSeq }
