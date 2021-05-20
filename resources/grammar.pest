@@ -1,33 +1,44 @@
 WHITESPACE      = _{ " " | "\n" }
 COMMENT         = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+NONE			= _{ "" }
 
+UnOp            = { "+" | "-" }
 AddOp           = { "+" | "-" }
 MulOp           = { "*" | "/" }
 Alphabet        = { ('a'..'z') | ('A'..'Z') }
 Digit           = { '0'..'9' }
-CompOp          = { "==" | ">=" | ">" | "<=" | "<" }
+CompOp          = { "!=" | "==" | ">=" | ">" | "<=" | "<" }
 Types           = { "int" | "char" }
 Ident           = @{ Alphabet ~ (Digit | Alphabet)* }
 Number          = @{ AddOp? ~ '1'..'9' ~ Digit* }
-Expr            = { AtomExpr ~ CompOp ~ AtomExpr | AtomExpr }
 
-AtomExpr        = { Term ~ AtomExprHalf }
-AtomExprHalf    = { AddOp ~ Term ~ AtomExprHalf | "" }
+Expr         	= { Comp ~ ExprHalf }
+ExprHalf     	= _{ AddOp ~ Comp ~ ExprHalf | NONE }
 
-Term            = { Factor ~ TermHalf }
-TermHalf        = { MulOp ~ Factor ~ TermHalf | "" }
+Comp	        = { Term ~ CompHalf }
+CompHalf     	= _{ CompOp ~ Term ~ CompHalf | NONE }
 
-Factor          = { "(" ~ Expr ~ ")" | Number | Ident }
+Term            = { UnaryExpr ~ TermHalf }
+TermHalf        = _{ MulOp ~ UnaryExpr ~ TermHalf | NONE }
 
-ExprSeq         = { Expr ~ "," ~ ExprSeq | Expr }
-CallStmt        = { Ident ~ "(" ~ ExprSeq ~ ")" }
+UnaryExpr       = { UnOp? ~ (("(" ~ Expr ~ ")" | Number | Ident)) }
+
+ExprSeq         = _{ Expr ~ "," ~ ExprSeq | Expr }
+Args			= { ExprSeq | NONE }
+CallStmt        = { Ident ~ "(" ~ Args ~ ")" }
 
 DeclStmt        = { Types ~ Ident }
 AssignStmt      = { Ident ~ ":=" ~ Expr }
-RepeatStmt      = { "repeat" ~ StmtSeq ~ "until" ~ Expr }
-IfStmt          = { SingleIfStmt | IfElseStmt }
-SingleIfStmt    = { "if" ~ "(" ~ Expr ~ ")" ~ "then" ~ StmtSeq ~ "end" }
-IfElseStmt      = { "if" ~ "(" ~ Expr ~ ")" ~ "then" ~ StmtSeq ~ "else" ~ StmtSeq ~ "end" }
-Stmt            = { IfStmt | RepeatStmt | AssignStmt | DeclStmt }
-StmtSeq         = { Stmt ~ ";" ~ StmtSeq | Stmt }
-Program         = { StmtSeq }
+RepeatStmt      = { "repeat" ~ RepeatBlk ~ "until" ~ Expr }
+RepeatBlk		= { StmtSeq }
+
+IfStmt          = { IfCond ~ IfBlk ~ ElseBlk? ~ "end" }
+
+IfCond			= { "if" ~ "(" ~ Expr ~ ")" ~ "then" }
+IfBlk			= { StmtSeq }
+ElseBlk			= { "else" ~ StmtSeq }
+
+Stmt            = { IfStmt | RepeatStmt | (AssignStmt | DeclStmt | CallStmt) ~ ";" }
+StmtSeq         = _{ Stmt ~ StmtSeq | Stmt }
+Program         = _{ SOI ~ StmtSeq ~ EOI }
+

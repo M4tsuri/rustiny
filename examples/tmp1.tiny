@@ -1,0 +1,21 @@
+int a;
+int b;
+int c;
+
+c := -(c - 1 - 1);
+c := -c - a * b;
+c := -a >= b;
+a := a;
+fun(a, b, a + d);
+fun();
+
+if (a > b) then
+    b := c;
+    b := 1;
+else
+    a := c;
+end
+
+repeat
+  a := a;
+until a == a
