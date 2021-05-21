@@ -27,7 +27,7 @@ fn main() {
         },
         Ok(x) => {
             for i in x.statements {
-                println!("{:?}\n", i);
+                println!("{:#?}\n", i);
             }
         }
     }

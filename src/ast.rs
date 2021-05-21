@@ -1,3 +1,8 @@
+/**
+ * This file provids method to construct our own AST struct from pest parsing results 
+ */
+
+
 use std::{fs::File, io::Read, iter::Rev};
 use pest::{Parser, iterators::Pairs, iterators::Pair};
 
@@ -5,6 +10,21 @@ use pest::{Parser, iterators::Pairs, iterators::Pair};
 #[grammar = "../resources/grammar.pest"]
 struct TinyParser;
 
+/**
+a program is a sequence of statements,
+for example, a program like:
+
+```
+int a;
+int b;
+```
+
+can be parsed to statements:
+
+```
+[DeclStmt(DeclStmt { ty: Int, ident: "a" }), DeclStmt(DeclStmt { ty: Int, ident: "b" })]
+```
+ */
 #[derive(Debug)]
 pub struct Program {
     pub statements: Vec<Statement>
@@ -44,6 +64,16 @@ impl Program {
     }
 }
 
+/**
+A statement has five forms
+
+- call statement: `fun_name()` or `fun_name(arg1, arg2, ...)`
+- assign statement: `dest = source_expression`
+- if statement: `if (condition) then statements end` or 
+  `if (condition) then statements else statements end`
+- repeat statement: `repeat statements until (condition)`
+- declaration: `type identifier`
+*/
 #[derive(Debug)]
 pub enum Statement {
     CallStmt(CallStmt),
@@ -67,6 +97,9 @@ impl Statement {
     }
 }
 
+/**
+else block is optional, note that we do not support else-if statement now
+*/
 #[derive(Debug)]
 pub struct IfStmt {
     condition: Expr,
@@ -92,6 +125,9 @@ impl IfStmt {
     }
 }
 
+/**
+now we only support int and char data, note that data in char type cannot occur in program as literal
+*/
 #[derive(Debug)]
 pub enum DataType {
     Int,
@@ -144,6 +180,16 @@ impl RepeatStmt {
     }
 }
 
+/**
+All binary operators, the precedence is as follows:
+
+```text
+| 0 | -, + (unary)         |
+| 1 | *, /                 |
+| 2 | >, <, ==, !=, <=, >= |
+| 3 | -, + (binary)        |
+```
+*/
 #[derive(Debug)]
 pub enum BinOp {
     AddOp,
@@ -203,6 +249,22 @@ impl From<&str> for Literal {
     }
 }
 
+/**
+for example, an expression like this:
+
+```
+-(c - 1 * 1 - 1 * 1)
+```
+
+the parsing tree is:
+
+![](/Users/ctsinon/Projects/Compiler/rustiny/resources/expr_example.png)
+
+when turned into our AST form:
+
+![](/Users/ctsinon/Projects/Compiler/rustiny/resources/expr_ast_example.png)
+
+*/
 #[derive(Debug)]
 pub enum Expr {
     UnaryExpr(UnaryExpr),
@@ -239,24 +301,17 @@ impl Expr {
 
 #[derive(Debug)]
 pub struct UnaryExpr {
-    op: Option<UnOp>,
+    op: UnOp,
     oprand: Box<Expr>
 }
 
 impl UnaryExpr {
     fn new(src: Pair<Rule>) -> Self {
         let mut inner = src.into_inner();
-        let mut first = inner.next().unwrap();
-        let mut op: Option<UnOp> = None;
-
-        if let Rule::UnOp = first.as_rule() {
-            op = Some(UnOp::new(first));
-            first = inner.next().unwrap();
-        }
 
         UnaryExpr {
-            op,
-            oprand: Box::new(Expr::new(first))
+            op: UnOp::new(inner.next().unwrap()),
+            oprand: Box::new(Expr::new(inner.next().unwrap()))
         }
     }
 }
