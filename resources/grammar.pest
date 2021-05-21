@@ -18,10 +18,11 @@ ExprHalf     	= _{ AddOp ~ Comp ~ ExprHalf | NONE }
 Comp	        = { Term ~ CompHalf }
 CompHalf     	= _{ CompOp ~ Term ~ CompHalf | NONE }
 
-Term            = { UnaryExpr ~ TermHalf }
-TermHalf        = _{ MulOp ~ UnaryExpr ~ TermHalf | NONE }
+Term            = { AtomExpr ~ TermHalf }
+TermHalf        = _{ MulOp ~ AtomExpr ~ TermHalf | NONE }
 
-UnaryExpr       = { UnOp? ~ (("(" ~ Expr ~ ")" | Number | Ident)) }
+AtomExpr		= _{ ("(" ~ Expr ~ ")" | Number | Ident) | UnaryExpr }
+UnaryExpr       = { UnOp ~ ("(" ~ Expr ~ ")" | Number | Ident) }
 
 ExprSeq         = _{ Expr ~ "," ~ ExprSeq | Expr }
 Args			= { ExprSeq | NONE }
@@ -41,4 +42,5 @@ ElseBlk			= { "else" ~ StmtSeq }
 Stmt            = { IfStmt | RepeatStmt | (AssignStmt | DeclStmt | CallStmt) ~ ";" }
 StmtSeq         = _{ Stmt ~ StmtSeq | Stmt }
 Program         = _{ SOI ~ StmtSeq ~ EOI }
+
 

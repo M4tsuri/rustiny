@@ -1,4 +1,4 @@
-use std::{fs::File, io::Read};
+use std::{fs::File, io::Read, iter::Rev};
 use pest::{Parser, iterators::Pairs, iterators::Pair};
 
 #[derive(Parser)]
@@ -7,7 +7,7 @@ struct TinyParser;
 
 #[derive(Debug)]
 pub struct Program {
-    statements: Vec<Statement>
+    pub statements: Vec<Statement>
 }
 
 fn parse_stmts(src: Pairs<Rule>) -> Vec<Statement> {
@@ -171,7 +171,7 @@ impl BinOp {
             ">=" => Self::Ge,
             "==" => Self::Eq,
             "!=" => Self::Ne,
-            _ => panic!("Op not supported.")
+            _ => panic!("{:?} op not supported.", src)
         }
     }
 }
@@ -193,20 +193,46 @@ impl UnOp {
 }
 
 #[derive(Debug)]
+pub enum Literal {
+    Int(i32)
+}
+
+impl From<&str> for Literal {
+    fn from(x: &str) -> Self {
+        Self::Int(x.parse().unwrap())
+    }
+}
+
+#[derive(Debug)]
 pub enum Expr {
-    UnaryExpr(Box<UnaryExpr>),
-    BinExpr(Box<BinExpr>)
+    UnaryExpr(UnaryExpr),
+    BinExpr(BinExpr),
+    Number(Literal),
+    Ident(Ident)
 }
 
 impl Expr {
-    fn new(src: Pair<Rule>) -> Self {
-        println!("{:?}\n\n", src);
-        let mut check = src.clone().into_inner().take(2);
-        check.next().unwrap();
+    fn parse_rec(src: &mut Rev<Pairs<Rule>>) -> Self {
+        let may_rhs = src.next().unwrap();
 
-        match check.next() {
-            None => {println!("{:?}", 123);Self::UnaryExpr(Box::new(UnaryExpr::new(src)))},
-            Some(_) => Self::BinExpr(Box::new(BinExpr::new(src)))
+        match src.next() {
+            None => Self::new(may_rhs),
+            Some(x) => {
+                Self::BinExpr(BinExpr {
+                    rhs: Box::new(Expr::new(may_rhs)),
+                    op: BinOp::new(x),
+                    lhs: Box::new(Expr::parse_rec(src))
+                })
+            },
+        }
+    }
+
+    fn new(src: Pair<Rule>) -> Self {
+        match src.as_rule() {
+            Rule::Number => Self::Number(src.as_str().into()),
+            Rule::Ident => Self::Ident(src.as_str().into()),
+            Rule::UnaryExpr => Self::UnaryExpr(UnaryExpr::new(src)),
+            _ => Self::parse_rec(&mut src.into_inner().rev())
         }
     }
 }
@@ -214,7 +240,7 @@ impl Expr {
 #[derive(Debug)]
 pub struct UnaryExpr {
     op: Option<UnOp>,
-    oprand: Expr
+    oprand: Box<Expr>
 }
 
 impl UnaryExpr {
@@ -230,7 +256,7 @@ impl UnaryExpr {
 
         UnaryExpr {
             op,
-            oprand: Expr::new(first)
+            oprand: Box::new(Expr::new(first))
         }
     }
 }
@@ -240,18 +266,6 @@ pub struct BinExpr {
     lhs: Box<Expr>,
     op: BinOp,
     rhs: Box<Expr>
-}
-
-impl BinExpr {
-    fn new(src: Pair<Rule>) -> Self {
-        let mut inner = src.into_inner();
-
-        BinExpr {
-            lhs: Box::new(Expr::new(inner.next().unwrap())),
-            op: BinOp::new(inner.next().unwrap()),
-            rhs: Box::new(Expr::new(inner.next().unwrap()))
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -273,22 +287,21 @@ impl AssignStmt {
 #[derive(Debug)]
 pub struct CallStmt {
     func: String,
-    args: Vec<Expr>
+    args: Option<Vec<Expr>>
 }
 
 impl CallStmt {
     fn new(src: Pair<Rule>) -> Self {
         let mut inner = src.into_inner();
-        let func = inner.next().unwrap().as_str().into();
-        let mut args = Vec::new();
-
-        for arg in inner.next().unwrap().into_inner() {
-            args.push(Expr::new(arg));
-        }
 
         CallStmt {
-            func,
-            args
+            func: inner.next().unwrap().as_str().into(),
+            args: match inner.peek().unwrap().into_inner().next() {
+                None => None,
+                Some(_) => Some(inner.next().unwrap().into_inner().map(|x| {
+                    Expr::new(x)
+                }).collect())
+            }
         }
     }
 }

@@ -1,21 +1,17 @@
 int a;
 int b;
-int c;
+char c;
 
-c := -(c - 1 - 1);
-c := -c - a * b;
-c := -a >= b;
-a := a;
-fun(a, b, a + d);
-fun();
+c := -(c - 1 * 1 - 1 * 1);
+c := a * b / c + 1 - (1 + 1);
 
-if (a > b) then
-    b := c;
-    b := 1;
-else
-    a := c;
+if (a) then
+  fun();
+else 
+  func(a, b, a + b / 2);
 end
 
 repeat
-  a := a;
-until a == a
+  a := a >= c;
+  b := b;
+until (c >= 1 + 1 / 2 - 1)
