@@ -5,7 +5,6 @@ extern crate pest_derive;
 mod ast;
 mod ir;
 
-use ast::Program;
 use clap::{AppSettings, Clap};
 
 /// This doc string acts as a help message when the user runs '--help'
@@ -21,10 +20,11 @@ struct Opts {
 fn main() {
     let opts: Opts = Opts::parse();
 
-    let ast = match Program::parse(&opts.input) {
+    let ast = match ast::Program::parse(&opts.input) {
         Ok(x) => x,
         Err(x) => panic!("{}", x)
     };
 
-
+    let ir = ir::Program::new(ast);
+    ir.emit();
 }

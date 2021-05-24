@@ -1,6 +1,4 @@
-/**
- * This file provids method to construct our own AST struct from pest parsing results 
- */
+//! This file provids method to construct our own AST struct from pest parsing results 
 
 
 use std::{fs::File, io::Read, iter::Rev};
@@ -10,21 +8,20 @@ use pest::{Parser, iterators::Pairs, iterators::Pair};
 #[grammar = "../resources/grammar.pest"]
 struct TinyParser;
 
-/**
-a program is a sequence of statements,
-for example, a program like:
+/// a program is a sequence of statements,
+/// for example, a program like:
+/// 
+/// ```
+/// int a;
+/// int b;
+/// ```
+/// 
+/// can be parsed to statements:
+/// 
+/// ```
+/// [DeclStmt(DeclStmt { ty: Int, ident: "a" }), DeclStmt(DeclStmt { ty: Int, ident: "b" })]
+/// ```
 
-```
-int a;
-int b;
-```
-
-can be parsed to statements:
-
-```
-[DeclStmt(DeclStmt { ty: Int, ident: "a" }), DeclStmt(DeclStmt { ty: Int, ident: "b" })]
-```
- */
 #[derive(Debug)]
 pub struct Program {
     pub statements: Vec<Statement>
@@ -64,17 +61,15 @@ impl Program {
     }
 }
 
-/**
-A statement has five forms
-
-- call statement: `fun_name()` or `fun_name(arg1, arg2, ...)`
-- assign statement: `dest = source_expression`
-- if statement: `if (condition) then statements end` or 
-  `if (condition) then statements else statements end`
-- repeat statement: `repeat statements until (condition)`
-- declaration: `type identifier`
-*/
-#[derive(Debug)]
+/// A statement has five forms
+/// 
+/// - call statement: `fun_name()` or `fun_name(arg1, arg2, ...)`
+/// - assign statement: `dest = source_expression`
+/// - if statement: `if (condition) then statements end` or 
+///   `if (condition) then statements else statements end`
+/// - repeat statement: `repeat statements until (condition)`
+/// - declaration: `type identifier`
+#[derive(Debug, Clone)]
 pub enum Statement {
     CallStmt(CallStmt),
     AssignStmt(AssignStmt),
@@ -97,10 +92,8 @@ impl Statement {
     }
 }
 
-/**
-else block is optional, note that we do not support else-if statement now
-*/
-#[derive(Debug)]
+/// else block is optional, note that we do not support else-if statement now
+#[derive(Debug, Clone)]
 pub struct IfStmt {
     condition: Expr,
     if_block: Vec<Statement>,
@@ -125,10 +118,8 @@ impl IfStmt {
     }
 }
 
-/**
-now we only support int and char data, note that data in char type cannot occur in program as literal
-*/
-#[derive(Debug)]
+/// now we only support int and char data, note that data in char type cannot occur in program as literal
+#[derive(Debug, Clone)]
 pub enum DataType {
     Int,
     Char
@@ -146,10 +137,10 @@ impl DataType {
 
 type Ident = String;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DeclStmt {
-    ty: DataType,
-    ident: Ident
+    pub ty: DataType,
+    pub ident: Ident
 }
 
 impl DeclStmt {
@@ -163,10 +154,10 @@ impl DeclStmt {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RepeatStmt {
-    statements: Vec<Statement>,
-    condition: Expr,
+    pub statements: Vec<Statement>,
+    pub condition: Expr,
 }
 
 impl RepeatStmt {
@@ -180,17 +171,15 @@ impl RepeatStmt {
     }
 }
 
-/**
-All binary operators, the precedence is as follows:
-
-```text
-| 0 | -, + (unary)         |
-| 1 | *, /                 |
-| 2 | >, <, ==, !=, <=, >= |
-| 3 | -, + (binary)        |
-```
-*/
-#[derive(Debug)]
+/// All binary operators, the precedence is as follows:
+/// 
+/// ```text
+/// | 0 | -, + (unary)         |
+/// | 1 | *, /                 |
+/// | 2 | >, <, ==, !=, <=, >= |
+/// | 3 | -, + (binary)        |
+/// ```
+#[derive(Debug, Clone)]
 pub enum BinOp {
     AddOp,
     SubOp,
@@ -222,7 +211,7 @@ impl BinOp {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UnOp {
     PosOp,
     NegOp,
@@ -238,9 +227,10 @@ impl UnOp {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum Literal {
-    Int(i32)
+    Int(i32),
+    Char(u8)
 }
 
 impl From<&str> for Literal {
@@ -249,23 +239,20 @@ impl From<&str> for Literal {
     }
 }
 
-/**
-for example, an expression like this:
-
-```
--(c - 1 * 1 - 1 * 1)
-```
-
-the parsing tree is:
-
-![](/Users/ctsinon/Projects/Compiler/rustiny/resources/expr_example.png)
-
-when turned into our AST form:
-
-![](/Users/ctsinon/Projects/Compiler/rustiny/resources/expr_ast_example.png)
-
-*/
-#[derive(Debug)]
+/// for example, an expression like this:
+/// 
+/// ```
+/// -(c - 1 * 1 - 1 * 1)
+/// ```
+/// 
+/// the parsing tree is:
+/// 
+/// ![](/Users/ctsinon/Projects/Compiler/rustiny/resources/expr_example.png)
+/// 
+/// when turned into our AST form:
+/// 
+/// ![](/Users/ctsinon/Projects/Compiler/rustiny/resources/expr_ast_example.png)
+#[derive(Debug, Clone)]
 pub enum Expr {
     UnaryExpr(UnaryExpr),
     BinExpr(BinExpr),
@@ -299,10 +286,10 @@ impl Expr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UnaryExpr {
-    op: UnOp,
-    oprand: Box<Expr>
+    pub op: UnOp,
+    pub oprand: Box<Expr>
 }
 
 impl UnaryExpr {
@@ -316,14 +303,14 @@ impl UnaryExpr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BinExpr {
-    lhs: Box<Expr>,
-    op: BinOp,
-    rhs: Box<Expr>
+    pub lhs: Box<Expr>,
+    pub op: BinOp,
+    pub rhs: Box<Expr>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AssignStmt {
     dest: String,
     src: Expr
@@ -339,7 +326,7 @@ impl AssignStmt {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CallStmt {
     func: String,
     args: Option<Vec<Expr>>
