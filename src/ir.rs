@@ -31,18 +31,24 @@
 //! ```
 //! 
 
-use std::{collections::HashMap, usize};
+use std::{collections::HashMap, ops::Deref, usize};
 use crate::ast::{self, Expr, Statement, BinOp, Literal};
 
-type Tid = usize;
+type InstrTid = usize;
+type StrTid = usize;
 type Ident = String;
 
 #[derive(Debug, Clone)]
 pub struct Program {
     stmts: Vec<Statement>,
     instrs: Vec<Instr>,
+    /// symbol id map to symbol name
+    strtab: HashMap<StrTid, Ident>,
+    /// symbol name map to symbol id
+    strmap: HashMap<Ident, StrTid>,
     symtab: HashMap<Ident, Symbol>,
-    tid_cnt: Tid
+    instr_tid_cnt: InstrTid,
+    str_tid_cnt: StrTid
 }
 
 impl Program {
@@ -50,8 +56,11 @@ impl Program {
         Program {
             stmts: ast.statements,
             instrs: Vec::new(),
+            strtab: HashMap::new(),
+            strmap: HashMap::new(),
             symtab: HashMap::new(),
-            tid_cnt: 0
+            instr_tid_cnt: 0,
+            str_tid_cnt: 0
         }
     }
 
@@ -61,9 +70,23 @@ impl Program {
         }
     }
 
+    /// receieve a variable name and initialize the corresponding hashmap entries (if needed).
+    /// returns the id of the name in string table
+    fn prepare_var(&mut self, ident: &Ident) -> StrTid {
+        match self.strmap.get(ident) {
+            Some(x) => *x,
+            None => {
+                let tid = self.get_str_tid();
+                self.strtab.insert(tid, ident.clone());
+                self.strmap.insert(ident.clone(), tid);
+                tid
+            }
+        }
+    }
+
     fn emit_expr(&mut self, expr: &Expr) -> Oprand {
         match expr {
-            Expr::Ident(x) => Oprand::Ident(x.clone()),
+            Expr::Ident(x) => Oprand::Ident(self.prepare_var(x)),
             Expr::Number(x) => Oprand::Literal(*x),
             Expr::UnaryExpr(x) => {
                 let rhs = self.emit_expr(x.oprand.as_ref());
@@ -74,25 +97,26 @@ impl Program {
                 };
 
                 let lhs = Oprand::Literal(Literal::Int(0));
-                let res = self.get_tmp_var();
-                let tid = self.get_tid();
+                let dest = self.get_tmp_var();
+                let tid = self.get_instr_tid();
                 
 
                 self.instrs.push(Instr {
                     tid,
                     op,
-                    oprands: vec![lhs, rhs]
+                    dest,
+                    src: (Some(lhs), Some(rhs))
                 });
 
-                Oprand::Ident(res.ident)
+                Oprand::Ident(dest)
             },
             Expr::BinExpr(x) => {
                 let lhs = self.emit_expr(x.lhs.as_ref());
                 let rhs = self.emit_expr(x.rhs.as_ref());
 
                 // note that the type of a expression result is consist with the type of lhs
-                let res = self.get_tmp_var();
-                let tid = self.get_tid();
+                let dest = self.get_tmp_var();
+                let tid = self.get_instr_tid();
 
                 self.instrs.push(Instr {
                     tid,
@@ -105,39 +129,53 @@ impl Program {
                         BinOp::Eq | BinOp::Ge | BinOp::Gt
                         | BinOp::Le | BinOp::Lt | BinOp::Ne => IrOp::CMP
                     },
-                    oprands: vec![lhs, rhs]
+                    dest,
+                    src: (Some(lhs), Some(rhs))
                 });
 
-                Oprand::Ident(res.ident)
+                Oprand::Ident(dest)
             }
         }
     }
 
-    fn get_tmp_var(&self) -> Symbol {
-        Symbol {
-            ty: SymType::Buttom,
-            /// the tid part of the tmp variable equals the tid of the conrresponding instruction
-            ident: format!("tmp_{}", self.tid_cnt + 1)
-        }
+    fn get_tmp_var(&mut self) -> StrTid {
+        self.str_tid_cnt += 1;
+        self.prepare_var(&format!("tmp_{}", self.str_tid_cnt - 1))
     }
 
-    fn get_tid(&mut self) -> Tid {
-        self.tid_cnt += 1;
-        self.tid_cnt
+    fn get_instr_tid(&mut self) -> InstrTid {
+        self.instr_tid_cnt += 1;
+        self.instr_tid_cnt - 1
+    }
+
+    fn get_str_tid(&mut self) -> StrTid {
+        self.str_tid_cnt += 1;
+        self.str_tid_cnt - 1
     }
 
     fn emit_statement(&mut self, stmt: &Statement) {
         match stmt {
             Statement::AssignStmt(x) => {
-                
+                let tid = self.get_instr_tid();
+                let src = self.emit_expr(&x.src);
+                let dest = self.prepare_var(&x.dest);
+
+                self.instrs.push(Instr {
+                    tid,
+                    op: IrOp::MOV,
+                    dest,
+                    src: (Some(src), None)
+                })
             },
             Statement::CallStmt(x) => {},
             Statement::DeclStmt(x) => {
-                let new_tid = self.get_tid();
+                let tid = self.get_instr_tid();
+                let dest = self.prepare_var(&x.ident);
                 self.instrs.push(Instr {
                     op: IrOp::DECL,
-                    oprands: vec![Oprand::Ident(x.ident.clone())],
-                    tid: new_tid
+                    tid,
+                    dest,
+                    src: (None, None)
                 });
 
                 self.symtab.insert(x.ident.clone(), Symbol {
@@ -145,7 +183,7 @@ impl Program {
                             ast::DataType::Char => SymType::Char,
                             ast::DataType::Int => SymType::Int
                         },
-                    ident: x.ident.clone()
+                    ident: dest
                 });
             },
             Statement::IfStmt(x) => {},
@@ -166,14 +204,15 @@ pub enum SymType {
 #[derive(Debug, Clone)]
 pub struct Symbol {
     ty: SymType,
-    ident: Ident
+    ident: StrTid
 }
 
 #[derive(Debug, Clone)]
 pub struct Instr {
-    tid: Tid,
+    tid: InstrTid,
     op: IrOp,
-    oprands: Vec<Oprand>
+    dest: StrTid,
+    src: (Option<Oprand>, Option<Oprand>)
 }
 
 #[derive(Debug, Clone)]
@@ -186,6 +225,7 @@ pub enum IrOp {
     JLE,
     CALL,
     ADD,
+    MOV,
     SUB,
     MUL,
     DIV,
@@ -196,5 +236,5 @@ pub enum IrOp {
 #[derive(Debug, Clone)]
 pub enum Oprand {
     Literal(Literal),
-    Ident(Ident)
+    Ident(StrTid)
 }

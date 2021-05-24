@@ -25,6 +25,6 @@ fn main() {
         Err(x) => panic!("{}", x)
     };
 
-    let ir = ir::Program::new(ast);
+    let mut ir = ir::Program::new(ast);
     ir.emit();
 }

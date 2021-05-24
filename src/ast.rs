@@ -312,8 +312,8 @@ pub struct BinExpr {
 
 #[derive(Debug, Clone)]
 pub struct AssignStmt {
-    dest: String,
-    src: Expr
+    pub dest: String,
+    pub src: Expr
 }
 
 impl AssignStmt {
