@@ -95,9 +95,9 @@ impl Statement {
 /// else block is optional, note that we do not support else-if statement now
 #[derive(Debug, Clone)]
 pub struct IfStmt {
-    condition: Expr,
-    if_block: Vec<Statement>,
-    else_block: Option<Vec<Statement>>,
+    pub condition: Expr,
+    pub if_block: Vec<Statement>,
+    pub else_block: Option<Vec<Statement>>,
 }
 
 impl IfStmt {
@@ -328,8 +328,8 @@ impl AssignStmt {
 
 #[derive(Debug, Clone)]
 pub struct CallStmt {
-    func: String,
-    args: Option<Vec<Expr>>
+    pub func: String,
+    pub args: Option<Vec<Expr>>
 }
 
 impl CallStmt {

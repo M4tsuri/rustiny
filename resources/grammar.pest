@@ -10,7 +10,7 @@ Digit           = { '0'..'9' }
 CompOp          = { "!=" | "==" | ">=" | ">" | "<=" | "<" }
 Types           = { "int" | "char" }
 Ident           = @{ Alphabet ~ (Digit | Alphabet)* }
-Number          = @{ AddOp? ~ '1'..'9' ~ Digit* }
+Number          = @{ AddOp? ~ (('1'..'9' ~ Digit*) | "0") }
 
 Expr         	= { Comp ~ ExprHalf }
 ExprHalf     	= _{ AddOp ~ Comp ~ ExprHalf | NONE }
@@ -42,5 +42,3 @@ ElseBlk			= { "else" ~ StmtSeq }
 Stmt            = { IfStmt | RepeatStmt | (AssignStmt | DeclStmt | CallStmt) ~ ";" }
 StmtSeq         = _{ Stmt ~ StmtSeq | Stmt }
 Program         = _{ SOI ~ StmtSeq ~ EOI }
-
-

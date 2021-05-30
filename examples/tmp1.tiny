@@ -6,12 +6,20 @@ c := -(c - 1 * 1 - 1 * 1);
 c := a * b / c + 1 - (1 + 1);
 
 if (a) then
-  fun();
-else 
-  func(a, b, a + b / 2);
+  read(a);
+  if (b) then
+    write(a);
+  else 
+    a := a + 1;
+  end
+else
+  if (c > 0) then
+    c := 1;
+  end
+  write(1);
 end
 
 repeat
   a := a >= c;
   b := b;
-until (c >= 1 + 1 / 2 - 1)
+until (c >= (1 + 1 / 2 - 1))

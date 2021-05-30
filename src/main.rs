@@ -4,6 +4,8 @@ extern crate pest_derive;
 
 mod ast;
 mod ir;
+mod codegen;
+mod analysis;
 
 use clap::{AppSettings, Clap};
 
@@ -23,8 +25,14 @@ fn main() {
     let ast = match ast::Program::parse(&opts.input) {
         Ok(x) => x,
         Err(x) => panic!("{}", x)
-    };
+    }; 
 
     let mut ir = ir::Program::new(ast);
     ir.emit();
+    ir.pprint();
+
+    let mut cfg = analysis::cfg::CFG::new(ir);
+    cfg.build();
+    cfg.pprint();
+
 }
