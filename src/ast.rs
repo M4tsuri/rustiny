@@ -230,7 +230,6 @@ impl UnOp {
 #[derive(Debug, Copy, Clone)]
 pub enum Literal {
     Int(i32),
-    #[allow(dead_code)]
     Char(u8)
 }
 

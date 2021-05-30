@@ -29,14 +29,10 @@ fn main() {
 
     let mut ir = ir::Program::new(ast);
     ir.emit();
-    // ir.pprint();
+    ir.pprint();
 
     let mut cfg = analysis::cfg::CFG::new(ir);
     cfg.build();
-    // cfg.pprint();
-
-    let mut rd = analysis::reaching_definition::RDContext::new(&mut cfg);
-    rd.analysis();
-    rd.pprint();
+    cfg.pprint();
 
 }

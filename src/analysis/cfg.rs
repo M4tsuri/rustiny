@@ -20,7 +20,7 @@ pub struct ProgramPoint {
 }
 
 pub struct BasicBlock {
-    pub instrs: Vec<ir::Instr>
+    instrs: Vec<ir::Instr>
 }
 
 /// A CFG is a directed graph with BasicBlocks as its Nodes and 
@@ -28,15 +28,8 @@ pub struct BasicBlock {
 /// A CFG can be derived from a IR program.
 /// Most of our static analysis and optimizations are based on CFG.
 pub struct CFG {
-    /// this field gives us the IR program, note that this field is read-only
-    pub ir: ir::Program,
-    pub graph: DiGraph<BasicBlock, ProgramPoint>,
-    /// this field map each entry of block to its index in CFG
-    entry2blk: HashMap<InstrTid, NodeIndex>,
-    /// this information is pretty important for our analysises later,
-    /// so we prepare it when building CFG
-    pub nexts: HashSet<(NodeIndex, NodeIndex)>,
-    ranges: Vec<SplitRange>
+    src_ir: ir::Program,
+    graph: DiGraph<BasicBlock, ProgramPoint>,
 }
 
 /// The struct representing a edge in a CFG.
@@ -88,35 +81,19 @@ impl CFG {
     /// construct a CFG object
     pub fn new(src: ir::Program) -> Self {
         CFG {
-            ir: src,
-            graph: DiGraph::new(),
-            entry2blk: HashMap::new(),
-            nexts: HashSet::new(),
-            ranges: Vec::new()
+            src_ir: src,
+            graph: DiGraph::new()
         }
-    }
-
-    pub fn get_node(&mut self, id: InstrTid) -> NodeIndex {
-        // println!("{:?}, {}", ranges, instr);
-        let range_idx = self.ranges.binary_search_by(|x| {
-            match (id < x.entry, id > x.end) {
-                (true, true) => panic!("what?"),
-                (false, false) => Ordering::Equal,
-                (true, false) => Ordering::Greater,
-                (false, true) => Ordering::Less
-            }
-        }).unwrap();
-
-        self.ranges.get(range_idx).unwrap().blockid
     }
 
     /// build the CFG from the IR program
     pub fn build(&mut self) {
         let mut split_edge: HashMap<InstrTid, SplitEdge> = HashMap::new();
-        let first_tid = self.ir.instrs.first().unwrap().tid;
-        let last_tid = self.ir.instrs.last().unwrap().tid;
+        let first_tid = self.src_ir.instrs.first().unwrap().tid;
+        let last_tid = self.src_ir.instrs.last().unwrap().tid;
 
         let mut add_edge = |from: InstrTid, to: InstrTid| {
+            println!("{} -> {}", from, to);
             if let Some(x) = split_edge.get_mut(&to) {
                 x.froms.insert(from);
             } else {
@@ -129,7 +106,7 @@ impl CFG {
             }
         };
 
-        for instr in &self.ir.instrs {
+        for instr in &self.src_ir.instrs {
             if !instr.is_branch() {
                 continue;
             }
@@ -144,7 +121,7 @@ impl CFG {
 
             add_edge(from, to);
             
-            let to_prev = self.ir.instrs.get(to - 1).unwrap();
+            let to_prev = self.src_ir.instrs.get(to - 1).unwrap();
             match to_prev.get_type() {
                 ir::InstrType::DirectJmp => {},
                 _ => add_edge(to - 1, to)
@@ -159,17 +136,17 @@ impl CFG {
         worklist.sort_by(|x, y| {
             x.to.cmp(&y.to)
         });
-        
+
+        let mut ranges: Vec<SplitRange> = Vec::new();
         let mut workiter = worklist.iter();
         let mut cur = workiter.next().unwrap();
 
         let mut graph_add_node = |start, end| {
             let id = self.graph.add_node(BasicBlock {
-                instrs: self.ir.instrs[start..end].into()
+                instrs: self.src_ir.instrs[start..end].into()
             });
-            self.entry2blk.insert(start, id);
 
-            self.ranges.push(SplitRange {
+            ranges.push(SplitRange {
                 blockid: id,
                 entry: start,
                 end: end - 1
@@ -185,11 +162,24 @@ impl CFG {
         // the end block
         graph_add_node(last_tid, last_tid + 1);
 
+        let get_node_in_range = |instr: InstrTid| -> NodeIndex {
+            // println!("{:?}, {}", ranges, instr);
+            let range_idx = ranges.binary_search_by(|x| {
+                match (instr < x.entry, instr > x.end) {
+                    (true, true) => panic!("what?"),
+                    (false, false) => Ordering::Equal,
+                    (true, false) => Ordering::Greater,
+                    (false, true) => Ordering::Less
+                }
+            }).unwrap();
+
+            ranges.get(range_idx).unwrap().blockid
+        };
+
         for (_, point) in split_edge {
-            let dest = self.get_node(point.to);
+            let dest = get_node_in_range(point.to);
             for in_entry in point.froms {
-                let src = self.get_node(in_entry);
-                self.nexts.insert((src, dest));
+                let src = get_node_in_range(in_entry);
                 self.graph.add_edge(src, dest, ProgramPoint {});
             }
         }
@@ -198,16 +188,13 @@ impl CFG {
     /// Pretty print the CFG, we use dot graph here
     /// Just copy the output of it to https://dreampuf.github.io/GraphvizOnline/
     /// and then you can see the CFG
-    #[allow(dead_code)]
     pub fn pprint(&self) {
         let dot_body = self.graph.raw_edges().iter().map(|node| {
             let src = self.graph.node_weight(node.source()).unwrap();
             let dest = self.graph.node_weight(node.target()).unwrap();
-            format!("  \"{:?}\\l{}\\l\" -> \"{:?}\\l{}\\l\"", 
-                node.source(),
-                self.ir.instrs_pprint(&src.instrs).replace("\n", "\\l"),
-                node.target(),
-                self.ir.instrs_pprint(&dest.instrs).replace("\n", "\\l"))
+            format!("  \"{}\\l\" -> \"{}\\l\"", 
+                self.src_ir.instrs_pprint(&src.instrs).replace("\n", "\\l"),
+                self.src_ir.instrs_pprint(&dest.instrs).replace("\n", "\\l"))
         }).collect::<Vec<String>>().join(";\n");
 
         println!("digraph G {{\n{}\n}}", dot_body);

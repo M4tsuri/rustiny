@@ -91,19 +91,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crepe"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a143ee68e4ec17aa70d0b95a1a5ef2c4e510b79cc3d956ea51bd2fe56d1856bd"
-dependencies = [
- "petgraph",
- "proc-macro-error",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "digest"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -297,7 +284,6 @@ name = "rustiny"
 version = "0.1.0"
 dependencies = [
  "clap",
- "crepe",
  "pest",
  "pest_derive",
  "petgraph",
