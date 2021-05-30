@@ -2,13 +2,12 @@ int a;
 int b;
 char c;
 
-c := -(c - 1 * 1 - 1 * 1);
-c := a * b / c + 1 - (1 + 1);
+a := 1;
 
 if (a) then
-  read(a);
+  a := 2;
   if (b) then
-    write(a);
+    b := 3;
   else 
     a := a + 1;
   end

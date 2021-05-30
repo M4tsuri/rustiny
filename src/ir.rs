@@ -36,7 +36,7 @@ use std::{collections::HashMap, usize};
 use crate::ast::{self, Expr, Statement, BinOp, Literal};
 
 pub type InstrTid = usize;
-type StrTid = usize;
+pub type StrTid = usize;
 type Ident = String;
 
 #[derive(Debug, Clone)]
@@ -47,28 +47,23 @@ pub struct Program {
     strtab: HashMap<StrTid, Ident>,
     /// symbol name map to symbol id
     strmap: HashMap<Ident, StrTid>,
-    symtab: HashMap<Ident, Symbol>,
+    pub symtab: HashMap<Ident, Symbol>,
     str_tid_cnt: StrTid
 }
 
-macro_rules! prepare_builtin_func {
-    ($s:expr, $e:expr, $proto:expr) => {
-        let prepare_builtin_idx = $s.prepare_var(&$e.into());
-        $s.symtab.insert($e.into(), Symbol {
-            ty: SymType::Func($proto),
-            ident: prepare_builtin_idx,
-            is_tmp: false
-        });
-    }
-}
-
 impl Program {
+    pub fn get_symbol(&self, tid: StrTid) -> &Symbol {
+        let name = self.get_str(tid).unwrap();
+        self.symtab.get(name).unwrap()
+    }
+
+    #[allow(dead_code)]
     pub fn instrs_pprint(&self, instrs: &Vec<Instr>) -> String {
         instrs.iter().map(|instr| {
             format!("{}  {}{:?} {}", 
                 instr.tid, 
                 match instr.dest {
-                    Some(Oprand::Ident(x)) => self.get_str(x).unwrap().clone() + " <- ",
+                    Some(x) => self.get_str(x).unwrap().clone() + " <- ",
                     _ => String::new(),
                 },
                 instr.op,
@@ -78,6 +73,7 @@ impl Program {
         }).collect::<Vec<String>>().join("\n")
     }
 
+    #[allow(dead_code)]
     pub fn pprint(&self) {
         println!("{}", self.instrs_pprint(&self.instrs));
     }
@@ -94,11 +90,21 @@ impl Program {
     }
 
     pub fn prepare_builtin_funcs(&mut self) {
-        prepare_builtin_func!(self, "write", FuncPrototype {
+        let mut prepare_builtin_func = |name: &str, proto: FuncPrototype| {
+            let prepare_builtin_idx = self.prepare_var(&name.into());
+            self.symtab.insert(name.into(), Symbol {
+                ty: SymType::Func(proto),
+                ident: prepare_builtin_idx,
+                is_tmp: false
+            });
+        };
+
+        prepare_builtin_func("write", FuncPrototype {
             args: vec![Box::new(SymType::Int)],
             ret_val: None
         });
-        prepare_builtin_func!(self, "read", FuncPrototype {
+
+        prepare_builtin_func("read", FuncPrototype {
             args: vec![Box::new(SymType::Int)],
             ret_val: None
         });
@@ -159,7 +165,7 @@ impl Program {
 
         // here we need to create a bool expression from a non-bool expression
         // simplely compare the return value of the non-bool expression with 0
-        let dest = Oprand::Ident(self.get_tmp_var());
+        let dest = self.get_tmp_var();
         self.instrs.push(Instr {
             tid: self.instrs.len(),
             dest: Some(dest),
@@ -181,24 +187,24 @@ impl Program {
                 };
 
                 let lhs = Oprand::Literal(Literal::Int(0));
-                let dest = Oprand::Ident(self.get_tmp_var());
+                let dest = self.get_tmp_var();
                 
 
                 self.instrs.push(Instr {
                     tid: self.instrs.len(),
                     op,
-                    dest: Some(dest.clone()),
+                    dest: Some(dest),
                     src: vec![lhs, rhs]
                 });
 
-                dest
+                Oprand::Ident(dest)
             },
             Expr::BinExpr(x) => {
                 let lhs = self.emit_expr(x.lhs.as_ref());
                 let rhs = self.emit_expr(x.rhs.as_ref());
 
                 // note that the type of a expression result is consist with the type of lhs
-                let dest = Oprand::Ident(self.get_tmp_var());
+                let dest = self.get_tmp_var();
 
                 self.instrs.push(Instr {
                     tid: self.instrs.len(),
@@ -211,11 +217,11 @@ impl Program {
                         BinOp::Eq | BinOp::Ge | BinOp::Gt
                         | BinOp::Le | BinOp::Lt | BinOp::Ne => IrOp::CMP
                     },
-                    dest: Some(dest.clone()),
+                    dest: Some(dest),
                     src: vec![lhs, rhs]
                 });
 
-                dest
+                Oprand::Ident(dest)
             }
         }
     }
@@ -240,7 +246,7 @@ impl Program {
         match stmt {
             Statement::AssignStmt(x) => {
                 let src = self.emit_expr(&x.src);
-                let dest = Oprand::Ident(self.prepare_var(&x.dest));
+                let dest = self.prepare_var(&x.dest);
 
                 self.instrs.push(Instr {
                     tid: self.instrs.len(),
@@ -365,23 +371,30 @@ pub enum SymType {
 #[derive(Debug, Clone)]
 pub struct Symbol {
     ty: SymType,
-    ident: StrTid,
-    is_tmp: bool
+    pub ident: StrTid,
+    pub is_tmp: bool
 }
 
 #[derive(Debug, Clone)]
 pub struct Instr {
     pub tid: InstrTid,
     pub op: IrOp,
-    pub dest: Option<Oprand>,
+    /// the destination of an instruction can only be a symbol name
+    pub dest: Option<StrTid>,
     pub src: Vec<Oprand>
 }
 
 pub enum InstrType {
     CondJmp,
+    #[allow(dead_code)]
     DirectJmp,
     FuncCall,
-    SeqInstr
+    Assign,
+    /// instructions with only implict affects
+    Implict,
+    /// instructions with no affects when executing.
+    /// these instructions are only useful when analyzing
+    Nop
 }
 
 impl Instr {
@@ -390,7 +403,10 @@ impl Instr {
             IrOp::JG | IrOp::JZ | IrOp::JNZ
             | IrOp::JGE | IrOp::JL | IrOp::JLE => InstrType::CondJmp,
             IrOp::CALL => InstrType::FuncCall,
-            _ => InstrType::SeqInstr
+            IrOp::ADD | IrOp::DIV | IrOp::MOV
+            | IrOp::MUL | IrOp::SUB => InstrType::Assign,
+            IrOp::CMP => InstrType::Implict,
+            IrOp::DECL | IrOp::END | IrOp::ENTRY => InstrType::Nop
         }
     }
 
