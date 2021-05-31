@@ -1,6 +1,6 @@
 WHITESPACE      = _{ " " | "\n" }
 COMMENT         = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
-NONE            = _{ "" }
+NONE			= _{ "" }
 
 UnOp            = { "+" | "-" }
 AddOp           = { "+" | "-" }
@@ -12,32 +12,32 @@ Types           = { "int" | "char" }
 Ident           = @{ Alphabet ~ (Digit | Alphabet)* }
 Number          = @{ AddOp? ~ (('1'..'9' ~ Digit*) | "0") }
 
-Expr            = { Comp ~ ExprHalf }
-ExprHalf        = _{ AddOp ~ Comp ~ ExprHalf | NONE }
+Expr         	= { Comp ~ ExprHalf }
+ExprHalf     	= _{ AddOp ~ Comp ~ ExprHalf | NONE }
 
-Comp            = { Term ~ CompHalf }
-CompHalf        = _{ CompOp ~ Term ~ CompHalf | NONE }
+Comp	        = { Term ~ CompHalf }
+CompHalf     	= _{ CompOp ~ Term ~ CompHalf | NONE }
 
 Term            = { AtomExpr ~ TermHalf }
 TermHalf        = _{ MulOp ~ AtomExpr ~ TermHalf | NONE }
 
-AtomExpr        = _{ ("(" ~ Expr ~ ")" | Number | Ident) | UnaryExpr }
+AtomExpr		= _{ ("(" ~ Expr ~ ")" | Number | Ident) | UnaryExpr }
 UnaryExpr       = { UnOp ~ ("(" ~ Expr ~ ")" | Number | Ident) }
 
 ExprSeq         = _{ Expr ~ "," ~ ExprSeq | Expr }
-Args            = { ExprSeq | NONE }
+Args			= { ExprSeq | NONE }
 CallStmt        = { Ident ~ "(" ~ Args ~ ")" }
 
 DeclStmt        = { Types ~ Ident }
 AssignStmt      = { Ident ~ ":=" ~ Expr }
 RepeatStmt      = { "repeat" ~ RepeatBlk ~ "until" ~ Expr }
-RepeatBlk       = { StmtSeq }
+RepeatBlk		= { StmtSeq }
 
 IfStmt          = { IfCond ~ IfBlk ~ ElseBlk? ~ "end" }
 
-IfCond          = { "if" ~ "(" ~ Expr ~ ")" ~ "then" }
-IfBlk           = { StmtSeq }
-ElseBlk         = { "else" ~ StmtSeq }
+IfCond			= { "if" ~ "(" ~ Expr ~ ")" ~ "then" }
+IfBlk			= { StmtSeq }
+ElseBlk			= { "else" ~ StmtSeq }
 
 Stmt            = { IfStmt | RepeatStmt | (AssignStmt | DeclStmt | CallStmt) ~ ";" }
 StmtSeq         = _{ Stmt ~ StmtSeq | Stmt }
