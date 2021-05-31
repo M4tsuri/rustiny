@@ -27,9 +27,10 @@ crepe! {
 /// The context to make a reaching-definition analysis on our program.
 /// A reaching-definition analysis determains the available span of a 
 /// assignment statement.
-pub struct RDContext {
+pub struct RDContext<'a> {
+    cfg: &'a CFG<'a>,
     /// All assignment statements and their destination
-    pub assigns: HashMap<InstrTid, StrTid>,
+    assigns: HashMap<InstrTid, StrTid>,
     /// Map variables to the statements which assigns value to them
     assigns_rev: HashMap<StrTid, HashSet<InstrTid>>,
     /// Map block id to its generation set
@@ -39,19 +40,18 @@ pub struct RDContext {
     /// An instruction is in kill set when it assigns a value to a variable and 
     /// there exists another instrcution which assigns to the same variable in the program
     kills: HashMap<NodeIndex, HashSet<InstrTid>>,
-    nexts: HashSet<(NodeIndex, NodeIndex)>,
     pub res: HashMap<NodeIndex, (HashSet<InstrTid>, HashSet<InstrTid>)>,
 }
 
-impl RDContext {
-    pub fn new(cfg: &CFG) -> Self {
+impl<'a> RDContext<'a> {
+    pub fn new(cfg: &'a mut CFG) -> Self {
         let mut res = RDContext {
+            cfg,
             assigns: HashMap::new(),
             assigns_rev: HashMap::new(),
             gens: HashMap::new(),
             kills: HashMap::new(),
             res: HashMap::new(),
-            nexts: cfg.nexts.clone()
         };
 
         // We only care of the variables defined by users.
@@ -65,11 +65,11 @@ impl RDContext {
             }
         };
 
-        for (_, sym) in &cfg.ir.symtab {
+        for (_, sym) in &res.cfg.ir.symtab {
             res.assigns_rev.insert(sym.ident, HashSet::new());
         }
         
-        for instr in &cfg.ir.instrs {
+        for instr in &res.cfg.ir.instrs {
             if consider_instr(instr) {
                 let dest = instr.dest.unwrap();
                 res.assigns.insert(instr.tid, dest);
@@ -77,10 +77,10 @@ impl RDContext {
             }
         }
 
-        for blk in cfg.graph.node_indices() {
+        for blk in res.cfg.graph.node_indices() {
             let mut gen_set = HashSet::new();
             let mut kill_set = HashSet::new();
-            for instr in &cfg.graph.node_weight(blk).unwrap().instrs {
+            for instr in &res.cfg.graph.node_weight(blk).unwrap().instrs {
                 if consider_instr(instr) {
                     let dest = instr.dest.unwrap();
                     let mut gen = HashSet::new();
@@ -112,7 +112,7 @@ impl RDContext {
             }).collect()
         }).flatten().collect());
 
-        runtime.extend::<Vec<Next>>(self.nexts.iter().map(|(x, y)| -> Next {
+        runtime.extend::<Vec<Next>>(self.cfg.nexts.iter().map(|(x, y)| -> Next {
             // println!("{:?} -> {:?}", x, y);
             Next(*x, *y)
         }).collect());

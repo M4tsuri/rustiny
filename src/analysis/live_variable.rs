@@ -6,44 +6,21 @@ use petgraph::graph::NodeIndex;
 
 use super::cfg::CFG;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum DUType {
-    Def,
-    Use
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct DUInstr {
-    ty: DUType,
-    sym: StrTid,
-    tid: InstrTid
-}
-
 crepe! {
     @input
-    struct Gen(NodeIndex, DUInstr);
+    struct Gen(NodeIndex, StrTid);
     @input
     struct Next(NodeIndex, NodeIndex);
     @input
-    struct Kill(NodeIndex, DUInstr);
+    struct Kill(NodeIndex, StrTid);
     
-    struct In(NodeIndex, DUInstr);
-    struct Out(NodeIndex, DUInstr);
-
     @output
-    struct DULink(DUInstr, DUInstr);
+    struct In(NodeIndex, StrTid);
+    @output
+    struct Out(NodeIndex, StrTid);
 
     In(b, s) <- Gen(b, s);
     In(b, s) <- Out(b, s), !Kill(b, s);
-
-    // def-use link appears between two blocks
-    // 1. def in b and use in d
-    DULink(p, q) <- Next(b, d), Out(b, p), Gen(d, q), (p.sym == q.sym);
-    // 2. both def and use in b, def before use
-    DULink(p, q) <- Kill(d, p), Gen(d, q), (p.sym == q.sym), (p.tid >= q.tid);
-    // 3. two uses in b
-    DULink(p, q) <- Gen(d, p), Gen(d, q), (p.sym == q.sym), (p.tid > q.tid);
-
     Out(b, s) <- Next(b, d), In(d, s);
 }
 
@@ -51,58 +28,54 @@ crepe! {
 /// This analysis determines the blocks a variable is used.
 /// Later we can build a du chain with the information we got in 
 /// live variable analysis and reaching definition analysis
-pub struct LVContext{
+pub struct LVContext<'a> {
+    cfg: &'a CFG<'a>,
     /// Map block id to its generation set
     /// A symbol is in generation set when it's used before killed(re-assigned) in this block
-    gens: HashMap<NodeIndex, HashSet<DUInstr>>,
+    gens: HashMap<NodeIndex, HashSet<StrTid>>,
     /// A collection of the use information in a block, it's useful when building the du-chain
-    pub uses: HashMap<NodeIndex, HashMap<DUInstr, Vec<InstrTid>>>,
+    uses: HashMap<NodeIndex, HashMap<StrTid, Vec<InstrTid>>>,
     /// Map block id to its kill set.
     /// A symbol is in kill set when it's assigned a new value in this block
-    kills: HashMap<NodeIndex, HashSet<DUInstr>>,
-    nexts: HashSet<(NodeIndex, NodeIndex)>,
-    pub res: HashMap<NodeIndex, (HashSet<DUInstr>, HashSet<DUInstr>)>,
+    kills: HashMap<NodeIndex, HashSet<StrTid>>,
+    pub res: HashMap<NodeIndex, (HashSet<StrTid>, HashSet<StrTid>)>,
 }
 
-impl LVContext {
-    pub fn new(cfg: &CFG) -> Self {
+impl<'a> LVContext<'a> {
+    pub fn new(cfg: &'a mut CFG) -> Self {
         let mut res = LVContext {
+            cfg,
             gens: HashMap::new(),
             uses: HashMap::new(),
             kills: HashMap::new(),
             res: HashMap::new(),
-            nexts: cfg.nexts.clone()
         };
 
-        for blk in cfg.graph.node_indices() {
+        for blk in res.cfg.graph.node_indices() {
             let mut gen_set = HashSet::new();
             let mut kill_set = HashSet::new();
-            for instr in &cfg.graph.node_weight(blk).unwrap().instrs {
+            let mut use_map: HashMap<InstrTid, Vec<InstrTid>> = HashMap::new();
+            for instr in &res.cfg.graph.node_weight(blk).unwrap().instrs {
                 // note that we must extend generation set first, for example:
                 // a <- add a, b
                 // here a is used before assigned
                 let used_set = instr.symbols_used();
-
-                gen_set.extend(used_set.iter().map(|x| {
-                    DUInstr {
-                        ty: DUType::Use,
-                        sym: *x,
-                        tid: instr.tid
+                for u in &used_set {
+                    match use_map.get_mut(u) {
+                        Some(x) => x.push(instr.tid),
+                        None => {use_map.insert(*u, vec![instr.tid]);}
                     }
-                }));
-
+                }
+                gen_set.extend(used_set);
                 if let InstrType::Assign = instr.get_type() {
-                    kill_set.insert(DUInstr {
-                        ty: DUType::Def,
-                        sym: instr.dest.unwrap(),
-                        tid: instr.tid
-                    });
+                    kill_set.insert(instr.dest.unwrap());
                 }
             }
 
             // println!("{:?}: Gen{:?}: Kill{:?}", blk, gen_set, kill_set);
             res.gens.insert(blk, gen_set);
             res.kills.insert(blk, kill_set);
+            res.uses.insert(blk, use_map);
         }
         res
     }
@@ -122,25 +95,42 @@ impl LVContext {
             }).collect()
         }).flatten().collect());
 
-        runtime.extend::<Vec<Next>>(self.nexts.iter().map(|(x, y)| -> Next {
+        runtime.extend::<Vec<Next>>(self.cfg.nexts.iter().map(|(x, y)| -> Next {
             // println!("{:?} -> {:?}", x, y);
             Next(*x, *y)
         }).collect());
 
-        let (res,) = runtime.run();
+        let (ins, outs): (HashSet<In>, HashSet<Out>) = runtime.run();
 
+        for out in outs {
+            match self.res.get_mut(&out.0) {
+                Some(x) => {x.1.insert(out.1);},
+                None => {
+                    let mut set = HashSet::new();
+                    set.insert(out.1);
+                    self.res.insert(out.0, (HashSet::new(), set));
+                }
+            }
+        }
+
+        for i in ins {
+            match self.res.get_mut(&i.0) {
+                Some(x) => {x.0.insert(i.1);},
+                None => panic!("what?")
+            }
+        }
     }
 
     #[allow(dead_code)]
-    pub fn pprint(&self, cfg: &CFG) {
+    pub fn pprint(&self) {
         for (k, v) in &self.res {
             print!("\nBlk {:?}:\n", k);
             println!("\tIn{:?}\n\tOut{:?}\n", 
                 v.0.iter().map(|x| {
-                    cfg.ir.get_str(*x).unwrap()
+                    self.cfg.ir.get_str(*x).unwrap()
                 }).collect::<Vec<&String>>(),
                 v.1.iter().map(|x| {
-                    cfg.ir.get_str(*x).unwrap()
+                    self.cfg.ir.get_str(*x).unwrap()
                 }).collect::<Vec<&String>>()
             );
         }
