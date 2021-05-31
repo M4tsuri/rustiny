@@ -1,3 +1,3 @@
 pub mod cfg;
-pub mod reaching_definition;
-pub mod live_variable;
+mod reaching_definition;
+mod live_variable;

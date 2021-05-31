@@ -11,16 +11,23 @@
 use std::{cmp::Ordering, collections::{HashMap, HashSet}};
 
 use petgraph::graph::{DiGraph, NodeIndex};
-
-use crate::ir::{self, InstrTid};
+use super::reaching_definition::RDContext;
+use super::live_variable::LVContext;
+use crate::ir::{self, InstrTid, StrTid};
 
 /// the type of a program point, this struct contains data we 
-pub struct ProgramPoint {
+pub struct Edge {
 
 }
 
 pub struct BasicBlock {
     pub instrs: Vec<ir::Instr>
+}
+
+#[derive(Debug, Clone)]
+pub struct DUNode {
+    tid: InstrTid, 
+    sym: StrTid,
 }
 
 /// A CFG is a directed graph with BasicBlocks as its Nodes and 
@@ -30,13 +37,16 @@ pub struct BasicBlock {
 pub struct CFG<'a> {
     /// this field gives us the IR program, note that this field is read-only
     pub ir: ir::Program<'a>,
-    pub graph: DiGraph<BasicBlock, ProgramPoint>,
+    pub graph: DiGraph<BasicBlock, Edge>,
     /// this field map each entry of block to its index in CFG
     entry2blk: HashMap<InstrTid, NodeIndex>,
     /// this information is pretty important for our analysises later,
     /// so we prepare it when building CFG
     pub nexts: HashSet<(NodeIndex, NodeIndex)>,
-    ranges: Vec<SplitRange>
+    ranges: Vec<SplitRange>,
+    // du-web is a DAG
+    pub du_web: DiGraph<DUNode, Edge>,
+    pub du_heads: Vec<NodeIndex>
 }
 
 /// The struct representing a edge in a CFG.
@@ -92,7 +102,9 @@ impl<'a> CFG<'a> {
             graph: DiGraph::new(),
             entry2blk: HashMap::new(),
             nexts: HashSet::new(),
-            ranges: Vec::new()
+            ranges: Vec::new(),
+            du_heads: Vec::new(),
+            du_web: DiGraph::new()
         }
     }
 
@@ -190,7 +202,61 @@ impl<'a> CFG<'a> {
             for in_entry in point.froms {
                 let src = self.get_node(in_entry);
                 self.nexts.insert((src, dest));
-                self.graph.add_edge(src, dest, ProgramPoint {});
+                self.graph.add_edge(src, dest, Edge {});
+            }
+        }
+
+        self.du_analysis();
+    }
+
+    /// make a def-use analysis, this helps us allocate registers later
+    pub fn du_analysis(&mut self) {
+        // firstly we perfrom a reaching-definition analysis
+        // this analysis tells us these information:
+        // 1. the instruction ids and their destinations of assignment statements
+        // 2. the lifetime of a assign statement indicated by the in-set and out-set of a block
+        let mut rd = RDContext::new(self);
+        rd.analysis();
+        // rd.pprint();
+
+        // then we perform a live variable analysis, this analysis gives us there information:
+        // 1. a map from the name of a symbol to the instruction using it for each block
+        // 2. mark whether a varibable may be used after a program point
+        let mut lv = LVContext::new(self);
+        lv.analysis();
+        // lv.pprint();
+
+        // firstly we find all head nodes in the du-web
+        // all of the head nodes are def-node, and all def-nodes are head-nodes
+        // we find them with the first information we got from reaching-definition analysis
+        for (tid, sym) in rd.assigns {
+            let id = self.du_web.add_node(DUNode {
+                tid,
+                sym
+            });
+            self.du_heads.push(id);
+        }
+
+        // then we start with each node head and go through the control-flow
+        // link each use with its corresponding define
+        for du_node_id in self.du_heads.clone() {
+            let du_node = self.du_web.node_weight(du_node_id).unwrap().clone();
+            let cfg_node_id = self.get_node(du_node.tid);
+
+            let lv_in = &lv.res.get(&cfg_node_id).unwrap().0;
+            let rd_in = &rd.res.get(&cfg_node_id).unwrap().0;
+            let use_map = lv.uses.get(&cfg_node_id).unwrap();
+
+            // check if this variable is alive in this block and if the assignment is not killed before this block
+            if !lv_in.contains(&du_node.sym) || !rd_in.contains(&du_node.sym) {
+                continue;
+            }
+
+            // now we can determine there are possibly a use of current definition in this block
+            // let's find it out
+            let cfg_node = self.graph.node_weight(cfg_node_id).unwrap();
+            for instr in use_map.get(&du_node.sym).unwrap() {
+                if 
             }
         }
     }
