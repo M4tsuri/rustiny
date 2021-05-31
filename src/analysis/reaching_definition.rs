@@ -8,16 +8,16 @@ use super::cfg::CFG;
 
 crepe! {
     @input
-    struct Gen(NodeIndex, StrTid);
+    struct Gen(NodeIndex, InstrTid);
     @input
     struct Next(NodeIndex, NodeIndex);
     @input
-    struct Kill(NodeIndex, StrTid);
+    struct Kill(NodeIndex, InstrTid);
     
     @output
-    struct In(NodeIndex, StrTid);
+    struct In(NodeIndex, InstrTid);
     @output
-    struct Out(NodeIndex, StrTid);
+    struct Out(NodeIndex, InstrTid);
 
     Out(b, s) <- Gen(b, s);
     Out(b, s) <- In(b, s), !Kill(b, s);
@@ -28,7 +28,7 @@ crepe! {
 /// A reaching-definition analysis determains the available span of a 
 /// assignment statement.
 pub struct RDContext<'a> {
-    cfg: &'a CFG,
+    cfg: &'a CFG<'a>,
     /// All assignment statements and their destination
     assigns: HashMap<InstrTid, StrTid>,
     /// Map variables to the statements which assigns value to them
