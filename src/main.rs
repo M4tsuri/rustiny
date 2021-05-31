@@ -39,6 +39,11 @@ fn compile(file: String) -> Result<(), String> {
     let mut cfg = analysis::cfg::CFG::new(ir);
     cfg.build();
     cfg.pprint();
+
+    let mut lv = analysis::live_variable::LVContext::new(&cfg);
+    lv.analysis();
+    lv.pprint(&cfg);
+
     Ok(())
 }
 

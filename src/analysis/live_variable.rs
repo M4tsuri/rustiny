@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crepe::crepe;
 use crate::ir::{InstrTid, InstrType, StrTid};
-use petgraph::graph::NodeIndex;
+use petgraph::graph::{DiGraph, NodeIndex};
 
 use super::cfg::CFG;
 
@@ -13,7 +13,7 @@ enum DUType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct DUInstr {
+pub struct DUNode {
     ty: DUType,
     sym: StrTid,
     tid: InstrTid
@@ -21,28 +21,33 @@ struct DUInstr {
 
 crepe! {
     @input
-    struct Gen(NodeIndex, DUInstr);
+    struct Gen(NodeIndex, DUNode);
     @input
     struct Next(NodeIndex, NodeIndex);
     @input
-    struct Kill(NodeIndex, DUInstr);
+    struct Kill(NodeIndex, DUNode);
     
-    struct In(NodeIndex, DUInstr);
-    struct Out(NodeIndex, DUInstr);
+    struct In(NodeIndex, DUNode);
+    struct Out(NodeIndex, DUNode);
 
     @output
-    struct DULink(DUInstr, DUInstr);
+    struct UDLink(DUNode, DUNode);
 
     In(b, s) <- Gen(b, s);
-    In(b, s) <- Out(b, s), !Kill(b, s);
+    In(b, s) <- Out(b, s), Kill(b, t), (!s.sym == t.sym);
 
     // def-use link appears between two blocks
-    // 1. def in b and use in d
-    DULink(p, q) <- Next(b, d), Out(b, p), Gen(d, q), (p.sym == q.sym);
+    // 1. def/use in b and def/use in d
+    UDLink(p, q) <- Next(b, d), In(d, p), Kill(b, q), 
+                    (p.sym == q.sym && p.tid >= q.tid);
+
+    UDLink(p, q) <- Next(b, d), In(d, p), Gen(b, q), 
+                    (p.sym == q.sym && p.tid > q.tid);
+
     // 2. both def and use in b, def before use
-    DULink(p, q) <- Kill(d, p), Gen(d, q), (p.sym == q.sym), (p.tid >= q.tid);
+    UDLink(p, q) <- Gen(d, p), Kill(d, q), (p.sym == q.sym && p.tid >= q.tid);
     // 3. two uses in b
-    DULink(p, q) <- Gen(d, p), Gen(d, q), (p.sym == q.sym), (p.tid > q.tid);
+    UDLink(p, q) <- Gen(d, p), Gen(d, q), (p.sym == q.sym && p.tid > q.tid);
 
     Out(b, s) <- Next(b, d), In(d, s);
 }
@@ -54,28 +59,28 @@ crepe! {
 pub struct LVContext{
     /// Map block id to its generation set
     /// A symbol is in generation set when it's used before killed(re-assigned) in this block
-    gens: HashMap<NodeIndex, HashSet<DUInstr>>,
-    /// A collection of the use information in a block, it's useful when building the du-chain
-    pub uses: HashMap<NodeIndex, HashMap<DUInstr, Vec<InstrTid>>>,
+    gens: HashMap<NodeIndex, HashSet<DUNode>>,
     /// Map block id to its kill set.
     /// A symbol is in kill set when it's assigned a new value in this block
-    kills: HashMap<NodeIndex, HashSet<DUInstr>>,
+    kills: HashMap<NodeIndex, HashSet<DUNode>>,
     nexts: HashSet<(NodeIndex, NodeIndex)>,
-    pub res: HashMap<NodeIndex, (HashSet<DUInstr>, HashSet<DUInstr>)>,
+    du_node_map: HashMap<DUNode, NodeIndex>,
+    pub du_web: DiGraph<DUNode, u8>,
 }
 
 impl LVContext {
     pub fn new(cfg: &CFG) -> Self {
         let mut res = LVContext {
             gens: HashMap::new(),
-            uses: HashMap::new(),
             kills: HashMap::new(),
-            res: HashMap::new(),
+            du_node_map: HashMap::new(),
+            du_web: DiGraph::new(),
             nexts: cfg.nexts.clone()
         };
 
         for blk in cfg.graph.node_indices() {
             let mut gen_set = HashSet::new();
+            let mut assign_set = HashSet::new();
             let mut kill_set = HashSet::new();
             for instr in &cfg.graph.node_weight(blk).unwrap().instrs {
                 // note that we must extend generation set first, for example:
@@ -83,24 +88,35 @@ impl LVContext {
                 // here a is used before assigned
                 let used_set = instr.symbols_used();
 
-                gen_set.extend(used_set.iter().map(|x| {
-                    DUInstr {
+                gen_set.extend(used_set.difference(&assign_set).map(|x| {
+                    let tmp = DUNode {
                         ty: DUType::Use,
                         sym: *x,
                         tid: instr.tid
-                    }
+                    };
+                    let id = res.du_web.add_node(tmp.clone());
+                    res.du_node_map.insert(tmp.clone(), id);
+                    tmp
                 }));
 
+                used_set.intersection(&assign_set).map(|x| {
+
+                });
+
                 if let InstrType::Assign = instr.get_type() {
-                    kill_set.insert(DUInstr {
+                    assign_set.insert(instr.dest.unwrap());
+                    let tmp = DUNode {
                         ty: DUType::Def,
                         sym: instr.dest.unwrap(),
                         tid: instr.tid
-                    });
+                    };
+                    let id = res.du_web.add_node(tmp.clone());
+                    res.du_node_map.insert(tmp.clone(), id);
+                    kill_set.insert(tmp);
                 }
             }
 
-            // println!("{:?}: Gen{:?}: Kill{:?}", blk, gen_set, kill_set);
+            println!("{:?}: Gen{:?}: Kill{:?}", blk, gen_set, kill_set);
             res.gens.insert(blk, gen_set);
             res.kills.insert(blk, kill_set);
         }
@@ -127,22 +143,26 @@ impl LVContext {
             Next(*x, *y)
         }).collect());
 
-        let (res,) = runtime.run();
+        let (res,): (HashSet<UDLink>,) = runtime.run();
+
+        for link in res {
+            self.du_web.add_edge(*self.du_node_map.get(&link.0).unwrap(), 
+                *self.du_node_map.get(&link.1).unwrap(), 
+                0);
+        }
 
     }
 
     #[allow(dead_code)]
     pub fn pprint(&self, cfg: &CFG) {
-        for (k, v) in &self.res {
-            print!("\nBlk {:?}:\n", k);
-            println!("\tIn{:?}\n\tOut{:?}\n", 
-                v.0.iter().map(|x| {
-                    cfg.ir.get_str(*x).unwrap()
-                }).collect::<Vec<&String>>(),
-                v.1.iter().map(|x| {
-                    cfg.ir.get_str(*x).unwrap()
-                }).collect::<Vec<&String>>()
-            );
-        }
+        let dot_body = self.du_web.raw_edges().iter().map(|node| {
+            let src = self.du_web.node_weight(node.source()).unwrap();
+            let dest = self.du_web.node_weight(node.target()).unwrap();
+            format!("  \"{}\\l\" -> \"{}\\l\"", 
+                format!("{:?}: {}: {}", src.ty, src.tid, cfg.ir.get_str(src.sym).unwrap()),
+                format!("{:?}: {}: {}", dest.ty, dest.tid, cfg.ir.get_str(dest.sym).unwrap()))
+        }).collect::<Vec<String>>().join(";\n");
+
+        println!("digraph G {{\n{}\n}}", dot_body);
     }
 }

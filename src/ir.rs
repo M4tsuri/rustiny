@@ -343,15 +343,7 @@ impl<'a> Program<'a> {
                     ast::DataType::Int => SymType::Int
                 };
 
-                let dest = self.prepare_var(&x.ident.name, ty, false);
-
-                self.instrs.push(Instr {
-                    op: IrOp::DECL,
-                    tid: self.instrs.len(),
-                    dest: None,
-                    src: vec![Oprand::Ident(dest)]
-                });
-
+                self.prepare_var(&x.ident.name, ty, false);
                 Ok(())
             },
             Statement::IfStmt(x) => {
@@ -475,7 +467,7 @@ impl Instr {
             IrOp::CALL => InstrType::FuncCall,
             IrOp::ADD | IrOp::DIV | IrOp::MOV
             | IrOp::MUL | IrOp::SUB | IrOp::CMP => InstrType::Assign,
-            IrOp::DECL | IrOp::END | IrOp::ENTRY => InstrType::Nop
+            IrOp::END | IrOp::ENTRY => InstrType::Nop
         }
     }
 
@@ -511,8 +503,7 @@ pub enum IrOp {
     DIV,
     CMP,
     ENTRY,
-    END,
-    DECL
+    END
 }
 
 impl IrOp {
