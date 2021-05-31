@@ -31,7 +31,7 @@
 //! ```
 //! 
 
-use std::{collections::HashMap, usize};
+use std::{collections::{HashMap, HashSet}, usize};
 
 use crate::ast::{self, Expr, Statement, BinOp, Literal};
 
@@ -390,22 +390,36 @@ pub enum InstrType {
     DirectJmp,
     FuncCall,
     Assign,
-    /// instructions with only implict affects
-    Implict,
     /// instructions with no affects when executing.
     /// these instructions are only useful when analyzing
     Nop
 }
 
 impl Instr {
+    /// return a set of names of symbols which is used as source in this instruction.
+    /// this method is useful when making a live variable analysis
+    pub fn symbols_used(&self) -> HashSet<StrTid> {
+        let mut res = HashSet::new();
+        let mut iter = self.src.iter();
+        if let IrOp::CALL = self.op {
+            iter.next();
+        }
+
+        for op in iter {
+            if let Oprand::Ident(id) = op {
+                res.insert(*id);
+            }
+        }
+        res
+    }
+
     pub fn get_type(&self) -> InstrType {
         match self.op {
             IrOp::JG | IrOp::JZ | IrOp::JNZ
             | IrOp::JGE | IrOp::JL | IrOp::JLE => InstrType::CondJmp,
             IrOp::CALL => InstrType::FuncCall,
             IrOp::ADD | IrOp::DIV | IrOp::MOV
-            | IrOp::MUL | IrOp::SUB => InstrType::Assign,
-            IrOp::CMP => InstrType::Implict,
+            | IrOp::MUL | IrOp::SUB | IrOp::CMP => InstrType::Assign,
             IrOp::DECL | IrOp::END | IrOp::ENTRY => InstrType::Nop
         }
     }

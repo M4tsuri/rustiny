@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crepe::crepe;
-use crate::ir::{Instr, InstrTid, InstrType, StrTid};
+use crate::ir::{InstrType, StrTid};
 use petgraph::graph::NodeIndex;
 
 use super::cfg::CFG;
@@ -19,74 +19,45 @@ crepe! {
     @output
     struct Out(NodeIndex, StrTid);
 
-    Out(b, s) <- Gen(b, s);
-    Out(b, s) <- In(b, s), !Kill(b, s);
-    In(b, s) <- Next(d, b), Out(d, s);
+    In(b, s) <- Gen(b, s);
+    In(b, s) <- Out(b, s), !Kill(b, s);
+    Out(b, s) <- Next(b, d), In(d, s);
 }
 
-/// The context to make a reaching-definition analysis on our program.
-/// A reaching-definition analysis determains the available span of a 
-/// assignment statement.
-pub struct RDContext<'a> {
+/// The context to make a live variable analysis.
+/// This analysis determines the blocks a variable is used.
+/// Later we can build a du chain with the information we got in 
+/// live variable analysis and reaching definition analysis
+pub struct LVContext<'a> {
     cfg: &'a CFG,
-    /// All assignment statements and their destination
-    assigns: HashMap<InstrTid, StrTid>,
-    /// Map variables to the statements which assigns value to them
-    assigns_rev: HashMap<StrTid, HashSet<InstrTid>>,
     /// Map block id to its generation set
-    /// An instruction is in generation set when it assigns a value to a variable
-    gens: HashMap<NodeIndex, HashSet<InstrTid>>,
+    /// A symbol is in generation set when it's used before killed(re-assigned) in this block
+    gens: HashMap<NodeIndex, HashSet<StrTid>>,
     /// Map block id to its kill set.
-    /// An instruction is in kill set when it assigns a value to a variable and 
-    /// there exists another instrcution which assigns to the same variable in the program
-    kills: HashMap<NodeIndex, HashSet<InstrTid>>,
-    pub res: HashMap<NodeIndex, (HashSet<InstrTid>, HashSet<InstrTid>)>,
+    /// A symbol is in kill set when it's assigned a new value in this block
+    kills: HashMap<NodeIndex, HashSet<StrTid>>,
+    pub res: HashMap<NodeIndex, (HashSet<StrTid>, HashSet<StrTid>)>,
 }
 
-impl<'a> RDContext<'a> {
+impl<'a> LVContext<'a> {
     pub fn new(cfg: &'a mut CFG) -> Self {
-        let mut res = RDContext {
+        let mut res = LVContext {
             cfg,
-            assigns: HashMap::new(),
-            assigns_rev: HashMap::new(),
             gens: HashMap::new(),
             kills: HashMap::new(),
             res: HashMap::new(),
         };
 
-        // We only care of the variables defined by users.
-        // Note that it's impossiable for temporary variables to transfer between
-        // basic blocks, so we do not make reaching-definition analysis for them.
-        let consider_instr = |instr: &Instr| -> bool {
-            if let InstrType::Assign = instr.get_type() {
-                true
-            } else {
-                false
-            }
-        };
-
-        for (_, sym) in &res.cfg.ir.symtab {
-            res.assigns_rev.insert(sym.ident, HashSet::new());
-        }
-        
-        for instr in &res.cfg.ir.instrs {
-            if consider_instr(instr) {
-                let dest = instr.dest.unwrap();
-                res.assigns.insert(instr.tid, dest);
-                res.assigns_rev.get_mut(&dest).unwrap().insert(instr.tid);
-            }
-        }
-
         for blk in res.cfg.graph.node_indices() {
             let mut gen_set = HashSet::new();
             let mut kill_set = HashSet::new();
             for instr in &res.cfg.graph.node_weight(blk).unwrap().instrs {
-                if consider_instr(instr) {
-                    let dest = instr.dest.unwrap();
-                    let mut gen = HashSet::new();
-                    gen.insert(instr.tid);
-                    gen_set.extend(&gen);
-                    kill_set.extend(res.assigns_rev.get(&dest).unwrap().difference(&gen));
+                // note that we must extend generation set first, for example:
+                // a <- add a, b
+                // here a is used before assigned
+                gen_set.extend(instr.symbols_used());
+                if let InstrType::Assign = instr.get_type() {
+                    kill_set.insert(instr.dest.unwrap());
                 }
             }
 
@@ -139,13 +110,16 @@ impl<'a> RDContext<'a> {
     }
 
     #[allow(dead_code)]
-    #[allow(dead_code)]
     pub fn pprint(&self) {
         for (k, v) in &self.res {
             print!("\nBlk {:?}:\n", k);
             println!("\tIn{:?}\n\tOut{:?}\n", 
-                v.0,
-                v.1
+                v.0.iter().map(|x| {
+                    self.cfg.ir.get_str(*x).unwrap()
+                }).collect::<Vec<&String>>(),
+                v.1.iter().map(|x| {
+                    self.cfg.ir.get_str(*x).unwrap()
+                }).collect::<Vec<&String>>()
             );
         }
     }

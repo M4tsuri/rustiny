@@ -33,10 +33,14 @@ fn main() {
 
     let mut cfg = analysis::cfg::CFG::new(ir);
     cfg.build();
-    // cfg.pprint();
+    cfg.pprint();
 
     let mut rd = analysis::reaching_definition::RDContext::new(&mut cfg);
     rd.analysis();
-    rd.pprint();
+    // rd.pprint();
+
+    let mut lv = analysis::live_variable::LVContext::new(&mut cfg);
+    lv.analysis();
+    lv.pprint();
 
 }
