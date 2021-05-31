@@ -27,9 +27,9 @@ pub struct BasicBlock {
 /// program points as the weigh of its Edges.
 /// A CFG can be derived from a IR program.
 /// Most of our static analysis and optimizations are based on CFG.
-pub struct CFG<'a> {
+pub struct CFG {
     /// this field gives us the IR program, note that this field is read-only
-    pub ir: ir::Program<'a>,
+    pub ir: ir::Program,
     pub graph: DiGraph<BasicBlock, ProgramPoint>,
     /// this field map each entry of block to its index in CFG
     entry2blk: HashMap<InstrTid, NodeIndex>,
@@ -84,9 +84,9 @@ struct SplitRange {
     blockid: NodeIndex
 }
 
-impl<'a> CFG<'a> {
+impl CFG {
     /// construct a CFG object
-    pub fn new(src: ir::Program<'a>) -> Self {
+    pub fn new(src: ir::Program) -> Self {
         CFG {
             ir: src,
             graph: DiGraph::new(),

@@ -31,10 +31,8 @@
 //! ```
 //! 
 
-use std::{collections::{HashMap, HashSet}, fmt::Debug, usize};
+use std::{collections::{HashMap, HashSet}, usize};
 
-use ast::Rule;
-use pest::{Span, error::Error};
 use crate::ast::{self, Expr, Statement, BinOp, Literal};
 
 pub type InstrTid = usize;
@@ -42,8 +40,8 @@ pub type StrTid = usize;
 type Ident = String;
 
 #[derive(Debug, Clone)]
-pub struct Program<'a> {
-    stmts: Vec<Statement<'a>>,
+pub struct Program {
+    stmts: Vec<Statement>,
     pub instrs: Vec<Instr>,
     /// symbol id map to symbol name
     strtab: HashMap<StrTid, Ident>,
@@ -53,7 +51,7 @@ pub struct Program<'a> {
     str_tid_cnt: StrTid
 }
 
-impl<'a> Program<'a> {
+impl Program {
     pub fn get_symbol(&self, tid: StrTid) -> &Symbol {
         let name = self.get_str(tid).unwrap();
         self.symtab.get(name).unwrap()
@@ -80,7 +78,7 @@ impl<'a> Program<'a> {
         println!("{}", self.instrs_pprint(&self.instrs));
     }
 
-    pub fn new(ast: ast::Program<'a>) -> Self {
+    pub fn new(ast: ast::Program) -> Self {
         Program {
             stmts: ast.statements,
             instrs: Vec::new(),
@@ -93,10 +91,12 @@ impl<'a> Program<'a> {
 
     pub fn prepare_builtin_funcs(&mut self) {
         let mut prepare_builtin_func = |name: &str, proto: FuncPrototype| {
-            self.prepare_var(
-                &name.into(), 
-                SymType::Func(proto),
-                false);
+            let prepare_builtin_idx = self.prepare_var(&name.into());
+            self.symtab.insert(name.into(), Symbol {
+                ty: SymType::Func(proto),
+                ident: prepare_builtin_idx,
+                is_tmp: false
+            });
         };
 
         prepare_builtin_func("write", FuncPrototype {
@@ -110,7 +110,7 @@ impl<'a> Program<'a> {
         });
     }
 
-    pub fn emit(&mut self) -> Result<(), String> {
+    pub fn emit(&mut self) {
         self.instrs.push(Instr {
             tid: self.instrs.len(),
             op: IrOp::ENTRY,
@@ -119,26 +119,20 @@ impl<'a> Program<'a> {
         });
 
         self.prepare_builtin_funcs();
-        self.emit_stmts(&self.stmts.clone())
-            .or_else(|x| {
-                Err(x.to_string())
-            })?;
+        self.emit_stmts(&self.stmts.clone());
 
         self.instrs.push(Instr {
             tid: self.instrs.len(),
             op: IrOp::END,
             dest: None,
             src: Vec::new(),
-        });
-
-        Ok(())
+        })
     }
 
-    fn emit_stmts(&mut self, stmts: &Vec<Statement>) -> Result<(), Error<Rule>> {
+    fn emit_stmts(&mut self, stmts: &Vec<Statement>) {
         for stmt in stmts {
-            self.emit_stmt(stmt)?;
+            self.emit_stmt(stmt)
         }
-        Ok(())
     }
 
     pub fn get_str(&self, id: StrTid) -> Option<&String> {
@@ -147,74 +141,53 @@ impl<'a> Program<'a> {
 
     /// receieve a variable name and initialize the corresponding hashmap entries (if needed).
     /// returns the id of the name in string table
-    fn prepare_var(&mut self, ident: &Ident, ty: SymType, is_tmp: bool) -> StrTid {
+    fn prepare_var(&mut self, ident: &Ident) -> StrTid {
         match self.strmap.get(ident) {
             Some(x) => *x,
             None => {
                 let tid = self.get_str_tid();
                 self.strtab.insert(tid, ident.clone());
                 self.strmap.insert(ident.clone(), tid);
-                self.symtab.insert(ident.clone(), Symbol {
-                    ty,
-                    ident: tid,
-                    is_tmp,
-                });
                 tid
             }
         }
     }
 
-    fn get_var(&mut self, ident: &Ident, span: &Span) -> Result<Symbol, Error<Rule>> {
-        match self.symtab.get(ident) {
-            Some(x) => Ok(x.clone()),
-            None => {
-                Err(pest::error::Error::new_from_span(
-                    pest::error::ErrorVariant::CustomError {
-                        message: String::from("variable must be declared before used.")
-                    }, 
-                    span.clone()))
-            }
-        }
-    }
-
-    fn emit_bool_expr(&mut self, expr: &Expr) -> Result<(), pest::error::Error<Rule>> {
-        let may_next = self.emit_expr(expr)?;
+    fn emit_bool_expr(&mut self, expr: &Expr) {
+        let may_next = self.emit_expr(expr);
         if let Expr::BinExpr(e) = expr {
             match e.op {
                 BinOp::Eq | BinOp::Ge | BinOp::Gt
-                | BinOp::Le | BinOp::Lt | BinOp::Ne => return Ok(()),
+                | BinOp::Le | BinOp::Lt | BinOp::Ne => return,
                 _ => {}
             }
         }
 
         // here we need to create a bool expression from a non-bool expression
         // simplely compare the return value of the non-bool expression with 0
-        let dest = self.get_tmp_var(SymType::Bool);
+        let dest = self.get_tmp_var();
         self.instrs.push(Instr {
             tid: self.instrs.len(),
             dest: Some(dest),
             op: IrOp::CMP,
             src: vec![may_next, Oprand::Literal(Literal::Int(0))]
-        });
-        Ok(())
+        })
     }
 
-    fn emit_expr(&mut self, expr: &Expr) -> Result<Oprand, pest::error::Error<Rule>> {
+    fn emit_expr(&mut self, expr: &Expr) -> Oprand {
         match expr {
-            Expr::Ident(x) => Ok(Oprand::Ident(self.get_var(&x.name, &x.span)?.ident)),
-            Expr::Number(x) => Ok(Oprand::Literal(x.content)),
+            Expr::Ident(x) => Oprand::Ident(self.prepare_var(x)),
+            Expr::Number(x) => Oprand::Literal(*x),
             Expr::UnaryExpr(x) => {
-                let rhs = self.emit_expr(x.oprand.as_ref())?;
+                let rhs = self.emit_expr(x.oprand.as_ref());
 
                 let op = match x.op {
                     ast::UnOp::NegOp => IrOp::SUB,
-                    ast::UnOp::PosOp => {return Ok(rhs)}
+                    ast::UnOp::PosOp => {return rhs}
                 };
 
                 let lhs = Oprand::Literal(Literal::Int(0));
-                let ty = lhs.combine_type(&rhs, &self, &x.span)?;
-                
-                let dest = self.get_tmp_var(ty);
+                let dest = self.get_tmp_var();
                 
 
                 self.instrs.push(Instr {
@@ -224,54 +197,43 @@ impl<'a> Program<'a> {
                     src: vec![lhs, rhs]
                 });
 
-                Ok(Oprand::Ident(dest))
+                Oprand::Ident(dest)
             },
             Expr::BinExpr(x) => {
-                let lhs = self.emit_expr(x.lhs.as_ref())?;
-                let rhs = self.emit_expr(x.rhs.as_ref())?;
-
-                let mut ty = lhs.combine_type(&rhs, &self, &x.span)?;
-
-                if let SymType::Int = ty {}
-                else {
-                    return Err(pest::error::Error::new_from_span(
-                        pest::error::ErrorVariant::CustomError {
-                            message: String::from("only int type is allowed in computation.")
-                        }, 
-                        x.span.clone()))
-                }
-                    
-                let op = match x.op {
-                    BinOp::AddOp => IrOp::ADD,
-                    BinOp::DivOp => IrOp::DIV,
-                    BinOp::MulOp => IrOp::MUL,
-                    BinOp::SubOp => IrOp::SUB,
-                    // the rest are comparsion ops
-                    BinOp::Eq | BinOp::Ge | BinOp::Gt
-                    | BinOp::Le | BinOp::Lt | BinOp::Ne => {
-                        ty = SymType::Bool;
-                        IrOp::CMP
-                    }
-                };
+                let lhs = self.emit_expr(x.lhs.as_ref());
+                let rhs = self.emit_expr(x.rhs.as_ref());
 
                 // note that the type of a expression result is consist with the type of lhs
-                let dest = self.get_tmp_var(ty);
+                let dest = self.get_tmp_var();
 
                 self.instrs.push(Instr {
                     tid: self.instrs.len(),
-                    op,
+                    op: match x.op {
+                        BinOp::AddOp => IrOp::ADD,
+                        BinOp::DivOp => IrOp::DIV,
+                        BinOp::MulOp => IrOp::MUL,
+                        BinOp::SubOp => IrOp::SUB,
+                        // the rest are comparsion ops
+                        BinOp::Eq | BinOp::Ge | BinOp::Gt
+                        | BinOp::Le | BinOp::Lt | BinOp::Ne => IrOp::CMP
+                    },
                     dest: Some(dest),
                     src: vec![lhs, rhs]
                 });
 
-                Ok(Oprand::Ident(dest))
+                Oprand::Ident(dest)
             }
         }
     }
 
-    fn get_tmp_var(&mut self, ty: SymType) -> StrTid {
+    fn get_tmp_var(&mut self) -> StrTid {
         let name = format!("tmp#{}", self.str_tid_cnt);
-        let tid = self.prepare_var(&name, ty, true);
+        let tid = self.prepare_var(&name);
+        self.symtab.insert(name, Symbol {
+            ty: SymType::Buttom,
+            ident: tid,
+            is_tmp: true
+        });
         tid
     }
 
@@ -280,29 +242,18 @@ impl<'a> Program<'a> {
         self.str_tid_cnt - 1
     }
 
-    fn emit_stmt(&mut self, stmt: &Statement) -> Result<(), pest::error::Error<Rule>> {
+    fn emit_stmt(&mut self, stmt: &Statement) {
         match stmt {
             Statement::AssignStmt(x) => {
-                let src = self.emit_expr(&x.src)?;
-                let dest = self.get_var(&x.dest, &x.span)?;
-                
-                if dest.ty != src.to_sym_type(self) {
-                    return Err(pest::error::Error::new_from_span(
-                        pest::error::ErrorVariant::CustomError {
-                            message: format!("conflict type detected: {:?} v.s. {:?}.", 
-                                dest.ty, 
-                                src.to_sym_type(self))
-                        }, 
-                        x.span.clone()))
-                }
+                let src = self.emit_expr(&x.src);
+                let dest = self.prepare_var(&x.dest);
 
                 self.instrs.push(Instr {
                     tid: self.instrs.len(),
                     op: IrOp::MOV,
-                    dest: Some(dest.ident),
+                    dest: Some(dest),
                     src: vec![src]
-                });
-                Ok(())
+                })
             },
             Statement::CallStmt(x) => {
                 let mut src = vec![Oprand::Ident(*self.strmap.get(&x.func)
@@ -316,11 +267,9 @@ impl<'a> Program<'a> {
 
                 match &x.args {
                     None => {},
-                    Some(exprs) => {
-                        for expr in exprs {
-                            src.push(self.emit_expr(expr)?)
-                        }
-                    }
+                    Some(x) => src.extend(x.iter().map(|e| {
+                        self.emit_expr(e)
+                    }))
                 };
 
                 if func_sym.args.len() != src.len() - 1 {
@@ -334,16 +283,9 @@ impl<'a> Program<'a> {
                     op: IrOp::CALL,
                     src
                 });
-
-                Ok(())
             },
             Statement::DeclStmt(x) => {
-                let ty = match x.ty {
-                    ast::DataType::Char => SymType::Char,
-                    ast::DataType::Int => SymType::Int
-                };
-
-                let dest = self.prepare_var(&x.ident.name, ty, false);
+                let dest = self.prepare_var(&x.ident);
 
                 self.instrs.push(Instr {
                     op: IrOp::DECL,
@@ -352,10 +294,17 @@ impl<'a> Program<'a> {
                     src: vec![Oprand::Ident(dest)]
                 });
 
-                Ok(())
+                self.symtab.insert(x.ident.clone(), Symbol {
+                    ty: match x.ty {
+                            ast::DataType::Char => SymType::Char,
+                            ast::DataType::Int => SymType::Int
+                        },
+                    ident: dest,
+                    is_tmp: false
+                });
             },
             Statement::IfStmt(x) => {
-                self.emit_bool_expr(&x.condition)?;
+                self.emit_bool_expr(&x.condition);
 
                 let jmp_idx = self.instrs.len();
 
@@ -368,11 +317,11 @@ impl<'a> Program<'a> {
                 });
 
                 if let Some(s) = &x.else_block {
-                    self.emit_stmts(s)?;
+                    self.emit_stmts(s);
                 }
 
                 let if_tid = self.instrs.len();
-                self.emit_stmts(&x.if_block)?;
+                self.emit_stmts(&x.if_block);
 
                 let mut jmp = self.instrs.get_mut(jmp_idx).unwrap();
                 jmp.src.push(Oprand::Target(if_tid));
@@ -380,14 +329,12 @@ impl<'a> Program<'a> {
                 if let Expr::BinExpr(b) = &x.condition {
                     jmp.op = IrOp::comp2jmp(&b.op);
                 }
-
-                Ok(())
             },
             Statement::RepeatStmt(x) => {
                 let blk_tid = self.instrs.len();
 
-                self.emit_stmts(&x.statements)?;
-                self.emit_bool_expr(&x.condition)?;
+                self.emit_stmts(&x.statements);
+                self.emit_bool_expr(&x.condition);
 
                 let mut jmp_op = IrOp::JNZ;
 
@@ -401,26 +348,24 @@ impl<'a> Program<'a> {
                     dest: None,
                     src: vec![Oprand::Target(blk_tid)]
                 });
-
-                Ok(())
             }
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct FuncPrototype {
     args: Vec<Box<SymType>>,
     ret_val: Option<Box<SymType>>
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum SymType {
     Func(FuncPrototype),
     Int,
     Char,
     /// this is a type to be discovered with static analysis
-    Bool
+    Buttom
 }
 
 #[derive(Debug, Clone)]
@@ -549,38 +494,6 @@ pub enum Oprand {
 }
 
 impl Oprand {
-    fn to_sym_type(&self, ir: &Program) -> SymType {
-        match self {
-            &Oprand::Ident(x) => ir.get_symbol(x).ty.clone(),
-            &Oprand::Literal(x) => x.to_sym_type(),
-            &Oprand::Target(_) => panic!("internal error: trying to get symbol type from branch target.")
-        }
-    }
-
-    fn combine_type(&self, oth: &Oprand, ir: &Program, span: &Span) -> Result<SymType, Error<Rule>> {
-        match (self, oth) {
-            (Oprand::Target(_), _) | (_, Oprand::Target(_)) => Err(pest::error::Error::new_from_span(
-                pest::error::ErrorVariant::CustomError {
-                    message: String::from("internal error.")
-                },
-                span.clone())),
-            _ => {
-                let lt = self.to_sym_type(ir);
-                let rt = oth.to_sym_type(ir);
-                if lt == rt {
-                    Ok(lt)
-                } else {
-                    Err(pest::error::Error::new_from_span(
-                        pest::error::ErrorVariant::CustomError {
-                            message: format!("conflict type detected: {:?} v.s. {:?}.", lt, rt)
-                        },
-                        span.clone()))
-                }
-            }
-        }
-
-    }
-
     fn pprint(&self, ir: &Program) -> String {
         match self {
             Oprand::Ident(x) => ir.get_str(*x).unwrap().clone(),
