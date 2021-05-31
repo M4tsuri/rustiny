@@ -1,8 +1,10 @@
 //! This file provids method to construct our own AST struct from pest parsing results 
 
 
-use std::{fs::File, io::Read, iter::Rev};
-use pest::{Parser, iterators::Pairs, iterators::Pair};
+use std::iter::Rev;
+use pest::{Parser, Span, iterators::Pair, iterators::Pairs};
+
+use crate::ir::SymType;
 
 #[derive(Parser)]
 #[grammar = "../resources/grammar.pest"]
@@ -23,8 +25,8 @@ struct TinyParser;
 /// ```
 
 #[derive(Debug)]
-pub struct Program {
-    pub statements: Vec<Statement>
+pub struct Program<'a> {
+    pub statements: Vec<Statement<'a>>
 }
 
 fn parse_stmts(src: Pairs<Rule>) -> Vec<Statement> {
@@ -41,15 +43,9 @@ fn parse_stmts(src: Pairs<Rule>) -> Vec<Statement> {
 }
 
 
-impl Program {
-    pub fn parse(file: &str) -> Result<Program, String> {
-        let mut src_file = File::open(file)
-            .expect("Failed when opening file.");
-
-        let mut src_str = String::new();
-        src_file.read_to_string(&mut src_str).unwrap();
-
-        let res = TinyParser::parse(Rule::Program, &src_str)
+impl<'a> Program<'a> {
+    pub fn parse(src: &String) -> Result<Program, String> {
+        let res = TinyParser::parse(Rule::Program, &src)
             .or_else(|x| Err(x.to_string()))?;
 
         let statements = parse_stmts(res);
@@ -70,16 +66,16 @@ impl Program {
 /// - repeat statement: `repeat statements until (condition)`
 /// - declaration: `type identifier`
 #[derive(Debug, Clone)]
-pub enum Statement {
-    CallStmt(CallStmt),
-    AssignStmt(AssignStmt),
-    IfStmt(IfStmt),
-    RepeatStmt(RepeatStmt),
-    DeclStmt(DeclStmt)
+pub enum Statement<'a> {
+    CallStmt(CallStmt<'a>),
+    AssignStmt(AssignStmt<'a>),
+    IfStmt(IfStmt<'a>),
+    RepeatStmt(RepeatStmt<'a>),
+    DeclStmt(DeclStmt<'a>)
 }
 
-impl Statement {
-    fn new(mut src: Pairs<Rule>) -> Self {
+impl<'a> Statement<'a> {
+    fn new(mut src: Pairs<'a, Rule>) -> Self {
         let stmt = src.next().unwrap();
         match stmt.as_rule() {
             Rule::DeclStmt => Self::DeclStmt(DeclStmt::new(stmt)),
@@ -94,14 +90,16 @@ impl Statement {
 
 /// else block is optional, note that we do not support else-if statement now
 #[derive(Debug, Clone)]
-pub struct IfStmt {
-    pub condition: Expr,
-    pub if_block: Vec<Statement>,
-    pub else_block: Option<Vec<Statement>>,
+pub struct IfStmt<'a> {
+    pub condition: Expr<'a>,
+    pub if_block: Vec<Statement<'a>>,
+    pub else_block: Option<Vec<Statement<'a>>>,
+    pub span: Span<'a>
 }
 
-impl IfStmt {
-    fn new(src: Pair<Rule>) -> Self {
+impl<'a> IfStmt<'a> {
+    fn new(src: Pair<'a, Rule>) -> Self {
+        let span = src.as_span();
         let mut inner = src.into_inner();
         let mut ifcond = inner.next().unwrap().into_inner();
         let ifblk = inner.next().unwrap().into_inner();
@@ -113,7 +111,8 @@ impl IfStmt {
             else_block: match elseblk {
                 Some(x) => Some(parse_stmts(x.into_inner())),
                 None => None
-            }
+            },
+            span,
         }
     }
 }
@@ -135,38 +134,54 @@ impl DataType {
     }
 }
 
-type Ident = String;
-
 #[derive(Debug, Clone)]
-pub struct DeclStmt {
-    pub ty: DataType,
-    pub ident: Ident
+pub struct Ident<'a> {
+    pub name: String,
+    pub span: Span<'a>
 }
 
-impl DeclStmt {
-    fn new(src: Pair<Rule>) -> Self {
-        let mut body = src.into_inner();
-        
-        DeclStmt {
-            ty: DataType::new(body.next().unwrap()),
-            ident: body.next().unwrap().as_str().into()
+impl<'a> From<Pair<'a, Rule>> for Ident<'a> {
+    fn from(x: Pair<'a, Rule>) -> Self {
+        Self {
+            name: x.as_str().into(),
+            span: x.as_span()
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct RepeatStmt {
-    pub statements: Vec<Statement>,
-    pub condition: Expr,
+pub struct DeclStmt<'a> {
+    pub ty: DataType,
+    pub ident: Ident<'a>,
+    pub span: Span<'a>
 }
 
-impl RepeatStmt {
-    fn new(src: Pair<Rule>) -> Self {
+impl<'a> DeclStmt<'a> {
+    fn new(src: Pair<'a, Rule>) -> Self {
+        let span = src.as_span();
+        let mut body = src.into_inner();
+        
+        DeclStmt {
+            ty: DataType::new(body.next().unwrap()),
+            ident: body.next().unwrap().into(),
+            span
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RepeatStmt<'a> {
+    pub statements: Vec<Statement<'a>>,
+    pub condition: Expr<'a>,
+}
+
+impl<'a> RepeatStmt<'a> {
+    fn new(src: Pair<'a, Rule>) -> Self {
         let mut inner = src.into_inner();
         
         RepeatStmt {
             statements: parse_stmts(inner.next().unwrap().into_inner()),
-            condition: Expr::new(inner.next().unwrap())
+            condition: Expr::new(inner.next().unwrap()),
         }
     }
 }
@@ -234,9 +249,28 @@ pub enum Literal {
     Char(u8)
 }
 
-impl From<&str> for Literal {
-    fn from(x: &str) -> Self {
-        Self::Int(x.parse().unwrap())
+#[derive(Debug, Clone)]
+pub struct LiteralWrapper<'a> {
+    pub content: Literal,
+    pub span: Span<'a>
+}
+
+impl Literal {
+    pub fn to_sym_type(&self) -> SymType {
+        match self {
+            Literal::Char(_) => SymType::Char,
+            Literal::Int(_) => SymType::Int
+        }
+    }
+}
+
+impl<'a> From<Pair<'a, Rule>> for LiteralWrapper<'a> {
+    fn from(x: Pair<'a, Rule>) -> Self {
+        let span = x.as_span();
+        Self {
+            content: Literal::Int(x.as_str().parse().unwrap()),
+            span
+        }
     }
 }
 
@@ -254,33 +288,35 @@ impl From<&str> for Literal {
 /// 
 /// ![](/Users/ctsinon/Projects/Compiler/rustiny/resources/expr_ast_example.png)
 #[derive(Debug, Clone)]
-pub enum Expr {
-    UnaryExpr(UnaryExpr),
-    BinExpr(BinExpr),
-    Number(Literal),
-    Ident(Ident)
+pub enum Expr<'a> {
+    UnaryExpr(UnaryExpr<'a>),
+    BinExpr(BinExpr<'a>),
+    Number(LiteralWrapper<'a>),
+    Ident(Ident<'a>)
 }
 
-impl Expr {
-    fn parse_rec(src: &mut Rev<Pairs<Rule>>) -> Self {
+impl<'a> Expr<'a> {
+    fn parse_rec(src: &mut Rev<Pairs<'a, Rule>>) -> Self {
         let may_rhs = src.next().unwrap();
 
         match src.next() {
             None => Self::new(may_rhs),
             Some(x) => {
+                let span = x.as_span();
                 Self::BinExpr(BinExpr {
                     rhs: Box::new(Expr::new(may_rhs)),
                     op: BinOp::new(x),
-                    lhs: Box::new(Expr::parse_rec(src))
+                    lhs: Box::new(Expr::parse_rec(src)),
+                    span
                 })
             },
         }
     }
 
-    fn new(src: Pair<Rule>) -> Self {
+    fn new(src: Pair<'a, Rule>) -> Self {
         match src.as_rule() {
-            Rule::Number => Self::Number(src.as_str().into()),
-            Rule::Ident => Self::Ident(src.as_str().into()),
+            Rule::Number => Self::Number(src.into()),
+            Rule::Ident => Self::Ident(src.into()),
             Rule::UnaryExpr => Self::UnaryExpr(UnaryExpr::new(src)),
             _ => Self::parse_rec(&mut src.into_inner().rev())
         }
@@ -288,53 +324,63 @@ impl Expr {
 }
 
 #[derive(Debug, Clone)]
-pub struct UnaryExpr {
+pub struct UnaryExpr<'a> {
     pub op: UnOp,
-    pub oprand: Box<Expr>
+    pub oprand: Box<Expr<'a>>,
+    pub span: Span<'a>
 }
 
-impl UnaryExpr {
-    fn new(src: Pair<Rule>) -> Self {
+impl<'a> UnaryExpr<'a> {
+    fn new(src: Pair<'a, Rule>) -> Self {
+        let span = src.as_span();
         let mut inner = src.into_inner();
 
         UnaryExpr {
             op: UnOp::new(inner.next().unwrap()),
-            oprand: Box::new(Expr::new(inner.next().unwrap()))
+            oprand: Box::new(Expr::new(inner.next().unwrap())),
+            span
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct BinExpr {
-    pub lhs: Box<Expr>,
+pub struct BinExpr<'a> {
+    pub lhs: Box<Expr<'a>>,
     pub op: BinOp,
-    pub rhs: Box<Expr>
+    pub rhs: Box<Expr<'a>>,
+    pub span: Span<'a>
 }
 
 #[derive(Debug, Clone)]
-pub struct AssignStmt {
+pub struct AssignStmt<'a> {
     pub dest: String,
-    pub src: Expr
+    pub src: Expr<'a>,
+    pub span: Span<'a>
 }
 
-impl AssignStmt {
-    fn new(src: Pair<Rule>) -> Self {
+impl<'a> AssignStmt<'a> {
+    fn new(src: Pair<'a, Rule>) -> Self {
+        let span = src.as_span();
         let mut inner = src.into_inner();
+
         AssignStmt {
             dest: inner.next().unwrap().as_str().into(),
-            src: Expr::new(inner.next().unwrap())
+            src: Expr::new(inner.next().unwrap()),
+            span
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct CallStmt {
+pub struct CallStmt<'a> {
     pub func: String,
-    pub args: Option<Vec<Expr>>
+    pub args: Option<Vec<Expr<'a>>>,
+    pub span: Span<'a>
 }
 
-impl CallStmt {
-    fn new(src: Pair<Rule>) -> Self {
+impl<'a> CallStmt<'a> {
+    fn new(src: Pair<'a, Rule>) -> Self {
+        let span = src.as_span();
         let mut inner = src.into_inner();
 
         CallStmt {
@@ -344,7 +390,8 @@ impl CallStmt {
                 Some(_) => Some(inner.next().unwrap().into_inner().map(|x| {
                     Expr::new(x)
                 }).collect())
-            }
+            },
+            span
         }
     }
 }

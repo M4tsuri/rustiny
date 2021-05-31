@@ -1,9 +1,8 @@
 int a;
 int b;
-char c;
+int c;
 char d;
 
-d := 2;
 a := 1;
 
 if (a) then
@@ -14,13 +13,13 @@ if (a) then
     a := a + 1;
   end
 else
-  if (c > 0) then
+  if (b > 0) then
     c := 1;
   end
   write(1);
 end
 
 repeat
-  a := a >= c;
+  a := a - c;
   b := b;
 until (c >= (1 + 1 / 2 - 1))

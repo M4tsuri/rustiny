@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crepe::crepe;
-use crate::ir::{InstrType, StrTid};
+use crate::ir::{InstrTid, InstrType, StrTid};
 use petgraph::graph::NodeIndex;
 
 use super::cfg::CFG;
@@ -29,10 +29,12 @@ crepe! {
 /// Later we can build a du chain with the information we got in 
 /// live variable analysis and reaching definition analysis
 pub struct LVContext<'a> {
-    cfg: &'a CFG,
+    cfg: &'a CFG<'a>,
     /// Map block id to its generation set
     /// A symbol is in generation set when it's used before killed(re-assigned) in this block
     gens: HashMap<NodeIndex, HashSet<StrTid>>,
+    /// A collection of the use information in a block, it's useful when building the du-chain
+    uses: HashMap<NodeIndex, HashMap<StrTid, Vec<InstrTid>>>,
     /// Map block id to its kill set.
     /// A symbol is in kill set when it's assigned a new value in this block
     kills: HashMap<NodeIndex, HashSet<StrTid>>,
@@ -44,6 +46,7 @@ impl<'a> LVContext<'a> {
         let mut res = LVContext {
             cfg,
             gens: HashMap::new(),
+            uses: HashMap::new(),
             kills: HashMap::new(),
             res: HashMap::new(),
         };
@@ -51,11 +54,19 @@ impl<'a> LVContext<'a> {
         for blk in res.cfg.graph.node_indices() {
             let mut gen_set = HashSet::new();
             let mut kill_set = HashSet::new();
+            let mut use_map: HashMap<InstrTid, Vec<InstrTid>> = HashMap::new();
             for instr in &res.cfg.graph.node_weight(blk).unwrap().instrs {
                 // note that we must extend generation set first, for example:
                 // a <- add a, b
                 // here a is used before assigned
-                gen_set.extend(instr.symbols_used());
+                let used_set = instr.symbols_used();
+                for u in &used_set {
+                    match use_map.get_mut(u) {
+                        Some(x) => x.push(instr.tid),
+                        None => {use_map.insert(*u, vec![instr.tid]);}
+                    }
+                }
+                gen_set.extend(used_set);
                 if let InstrType::Assign = instr.get_type() {
                     kill_set.insert(instr.dest.unwrap());
                 }
@@ -64,6 +75,7 @@ impl<'a> LVContext<'a> {
             // println!("{:?}: Gen{:?}: Kill{:?}", blk, gen_set, kill_set);
             res.gens.insert(blk, gen_set);
             res.kills.insert(blk, kill_set);
+            res.uses.insert(blk, use_map);
         }
         res
     }
