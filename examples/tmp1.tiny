@@ -13,13 +13,13 @@ if (a) then
     a := a + 1;
   end
 else
-  if (b > 0) then
+  if (c > 0) then
     c := 1;
   end
   write(1);
 end
 
 repeat
-  a := a - c;
+  a := b - 1;
   b := b;
 until (c >= (1 + 1 / 2 - 1))

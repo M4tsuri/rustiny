@@ -34,18 +34,22 @@ fn compile(file: String) -> Result<(), String> {
 
     let mut ir = ir::Program::new(ast);
     ir.emit()?;
-    // ir.pprint();
+    println!("------------ IR OUTPUT ------------");
+    ir.pprint();
 
     let mut cfg = analysis::cfg::CFG::new(ir);
     cfg.build();
+    println!("\n\n------------ CFG OUTPUT ------------");
     cfg.pprint();
 
     let mut rd = analysis::reaching_definition::RDContext::new(&mut cfg);
     rd.analysis();
-    // rd.pprint();
+    println!("\n\n------------ REACHING DEFINITION OUTPUT ------------");
+    rd.pprint();
 
     let mut lv = analysis::live_variable::LVContext::new(&mut cfg);
     lv.analysis();
+    println!("\n\n------------ LIVE VARIABLE OUTPUT ------------");
     lv.pprint();
     Ok(())
 }
