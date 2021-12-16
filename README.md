@@ -1,5 +1,36 @@
 # RusTiny -- A Rust implementation of Tiny+ language
 
+## Installation
+
+Firstly, you need to install rust nightly.
+
+Install rustup with
+
+```
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Switch to nightly toolchain with
+
+```
+rustup default nightly
+```
+
+Build this project with
+
+```
+git clone https://github.com/M4tsuri/rustiny.git
+cd rustiny
+cargo build --release
+```
+
+Run with
+
+```
+target/release/rustiny --input examples/tmp1.tiny
+```
+
+
 ## 编译器实践
 
 ### 基本要求:
